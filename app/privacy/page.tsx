@@ -2,73 +2,74 @@ import type { Metadata } from "next";
 import LegalShell from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy - OpenReply",
+  title: "Política de privacidade - FISGA",
   description:
-    "How OpenReply handles Instagram account data, webhook payloads, billing data, and customer campaign information.",
+    "Como a FISGA trata dados da conta do Instagram, eventos de webhook, dados de cobrança e informações de campanhas.",
 };
 
 export default function PrivacyPage() {
   return (
     <LegalShell
-      title="Privacy Policy"
-      description="OpenReply helps businesses send Meta-compliant private replies when people comment on connected Instagram posts or reels."
+      title="Política de privacidade"
+      description="A FISGA ajuda empresas a enviar respostas privadas autorizadas pela Meta quando alguém comenta em publicações ou Reels conectados."
       updatedAt="May 24, 2026"
     >
       <section>
-        <h2 className="text-xl font-bold text-white">Data We Collect</h2>
+        <h2 className="text-xl font-bold text-white">Dados que coletamos</h2>
         <p className="mt-3">
-          We collect account email addresses for authentication, workspace and
-          billing metadata, connected Instagram account identifiers, encrypted
-          Instagram access tokens, campaign settings, webhook payloads,
-          comments needed to process campaigns, delivery logs, and operational
-          diagnostics.
+          Coletamos endereços de e-mail para autenticação, metadados do espaço de
+          trabalho e de cobrança, identificadores das contas do Instagram
+          conectadas, tokens de acesso criptografados, configurações de campanha,
+          dados de webhook, comentários necessários para processar campanhas,
+          registros de entrega e diagnósticos operacionais.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">How We Use Data</h2>
+        <h2 className="text-xl font-bold text-white">Como usamos os dados</h2>
         <p className="mt-3">
-          We use this data to authenticate users, connect Instagram
-          integrations, match comment keywords, send private replies through the
-          official Meta APIs, prevent duplicate sends, troubleshoot failures,
-          and protect the service.
+          Usamos esses dados para autenticar usuários, conectar contas do
+          Instagram, identificar palavras-chave em comentários, enviar respostas
+          privadas pelas APIs oficiais da Meta, evitar envios duplicados,
+          investigar falhas e proteger o serviço.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Instagram And Meta Data</h2>
+        <h2 className="text-xl font-bold text-white">Dados do Instagram e da Meta</h2>
         <p className="mt-3">
-          OpenReply does not ask for Instagram passwords, scrape Instagram, or
-          use browser automation. Instagram tokens are encrypted at rest and are
-          used only to perform actions authorized by the connected business
-          account.
+          A FISGA não pede senhas do Instagram, não coleta dados por scraping e
+          não automatiza a navegação pelo navegador. Os tokens do Instagram são
+          criptografados quando armazenados e usados apenas para realizar ações
+          autorizadas pela conta comercial conectada.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Subprocessors</h2>
+        <h2 className="text-xl font-bold text-white">Prestadores de serviço</h2>
         <p className="mt-3">
-          The production service may use hosting, database, Redis queue, email,
-          and observability providers such as Vercel, Railway, PostgreSQL,
-          Redis, and Resend. These providers process data only as needed to run
-          the service.
+          O serviço pode usar provedores de hospedagem, banco de dados, filas
+          Redis, e-mail e monitoramento, como Vercel, Railway, PostgreSQL, Redis
+          e Resend. Esses provedores processam dados apenas quando necessário
+          para operar o serviço.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Retention And Deletion</h2>
+        <h2 className="text-xl font-bold text-white">Retenção e exclusão</h2>
         <p className="mt-3">
-          Customers can disconnect Instagram from settings, which removes the
-          stored Instagram connection and stops campaigns. For account or data
-          deletion, follow the Data Deletion page linked from the footer.
+          Você pode desconectar o Instagram nas configurações. Isso remove a
+          conexão armazenada e interrompe as campanhas. Para solicitar a
+          exclusão da conta ou de outros dados, consulte a página de exclusão de
+          dados no rodapé.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Contact</h2>
+        <h2 className="text-xl font-bold text-white">Contato</h2>
         <p className="mt-3">
-          For privacy questions, contact the repository owner through GitHub or
-          the support email configured for the hosted OpenReply service.
+          Para dúvidas sobre privacidade, use o e-mail de suporte informado pela
+          equipe responsável pelo seu espaço de trabalho.
         </p>
       </section>
     </LegalShell>

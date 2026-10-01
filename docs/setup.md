@@ -80,6 +80,153 @@ Note on crons: Vercel's free plan allows each cron to run at most once per day. 
 
 Optional custom domain: if you want `openreply.yoursite.com` instead of the Vercel URL, add it in Vercel under Domains and make it primary. Then update `NEXTAUTH_URL` and the two Meta URLs (Step 7 and Step 8 below) to the new domain, and update the worker's `NEXTAUTH_URL` too, or tracked links in DMs will point at the old domain.
 
+## Implantação com Docker, Traefik e Cloudflare (produção)
+
+Esta é a alternativa usada na instância auto-hospedada do projeto. Ela mantém a aplicação web, o worker, PostgreSQL e Redis no mesmo servidor Docker e usa Traefik para HTTPS. O domínio público configurado para esta instância é `https://reply.iafotos.com.br`.
+
+> Não salve no Git o arquivo `.env`, chaves de API, tokens do Instagram, credenciais SSH ou endereços privados do servidor. Use apenas os nomes das variáveis e valores de exemplo neste documento.
+
+### 1. Preparar o servidor
+
+No servidor com Docker e Docker Compose, crie um diretório para o projeto e clone o repositório:
+
+```bash
+mkdir -p /opt/openreply
+git clone https://github.com/diwenne/openreply /opt/openreply
+cd /opt/openreply
+```
+
+Copie `.env.example` para `.env` e preencha as variáveis da seção [Environment variables](#environment-variables). Gere valores novos para todos os segredos; não reutilize valores que tenham sido enviados por chat.
+
+O `DATABASE_URL` e o `REDIS_URL` devem apontar para os nomes dos serviços da rede interna do Compose, por exemplo:
+
+```env
+DATABASE_URL=postgresql://postgres:UMA_SENHA_FORTE@postgres:5432/openreply
+REDIS_URL=redis://redis:6379
+NEXTAUTH_URL=https://reply.iafotos.com.br
+MEDIA_STORAGE_DIR=/data/media
+```
+
+Crie um volume persistente para os arquivos de imagem e vídeo:
+
+```bash
+docker volume create openreply-media
+```
+
+### 2. Adicionar web, worker e Traefik
+
+O `docker-compose.yml` do projeto inicia PostgreSQL e Redis. Crie um arquivo adicional chamado `docker-compose.server.yml` para a aplicação web, o worker e a rota HTTPS. Ajuste o domínio e o nome da rede do Traefik se a sua infraestrutura usar nomes diferentes.
+
+```yaml
+services:
+  web:
+    build: .
+    image: openreply:latest
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - openreply-media:/data/media
+    command: sh -c "npx prisma migrate deploy && npm run start"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.routers.openreply.rule=Host(`reply.iafotos.com.br`)
+      - traefik.http.routers.openreply.entrypoints=websecure
+      - traefik.http.routers.openreply.tls=true
+      - traefik.http.services.openreply.loadbalancer.server.port=3000
+    networks: [default, traefik]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: openreply:latest
+    env_file: .env
+    volumes:
+      - openreply-media:/data/media
+    command: sh -c "npx prisma migrate deploy && npm run worker"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  traefik:
+    external: true
+
+volumes:
+  openreply-media:
+    external: true
+    name: openreply-media
+```
+
+O mesmo volume precisa estar montado em `web` e `worker`: o primeiro recebe o
+arquivo e o segundo cria a publicação no Instagram. Não use dois volumes com
+nomes diferentes. Em um proxy da Cloudflare, o envio é dividido em blocos
+menores que 8 MB para caber no limite de cada requisição.
+
+Suba a aplicação combinando os dois arquivos:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.server.yml build web
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+```
+
+Verifique o serviço depois da primeira subida e sempre após um deploy:
+
+```bash
+curl -fsS https://reply.iafotos.com.br/api/health
+```
+
+O resultado esperado é `"status":"ok"` e `"worker":{"healthy":true}`. Para investigar, use `docker compose -f docker-compose.yml -f docker-compose.server.yml logs -f web worker`.
+
+### Publicar e acompanhar Stories
+
+A página **Stories** permite montar uma sequência com até 20 quadros, salvar como rascunho, publicar imediatamente ou agendar. Cada arquivo vira um Story individual e a fila publica os quadros na ordem selecionada. Uma falha no meio da sequência fica marcada como parcial; os quadros já publicados não são enviados novamente numa retomada.
+
+Stories usam o Instagram API com Facebook Login, pois o fluxo de publicação com Instagram Login não oferece esse formato. Na configuração de Facebook Login da Meta, conceda `instagram_content_publish` para publicar e `instagram_manage_insights` para métricas, além das permissões de leitura da Página exigidas pelo fluxo. A publicação de Stories exige uma conta Instagram Business vinculada a uma Página do Facebook. Conecte essa Página em **Configurações → Facebook** e selecione a Página associada à conta; o OpenReply tenta reconhecer vínculos que já estavam conectados. Se as permissões da configuração de Facebook Login mudarem, reconecte a Página.
+
+O worker consulta métricas periodicamente durante a janela em que a Meta mantém o Story acessível. O OpenReply salva cópias das métricas disponíveis, mas a Meta pode omitir métricas dependendo da conta, da permissão e da idade do Story. A conclusão da sequência compara o alcance do primeiro e do último quadro; números ausentes aparecem como traço. **Duplicar para editar** cria um novo rascunho com os arquivos e a ordem da sequência publicada, sem republicar automaticamente.
+
+### Publicar e analisar Trial Reels
+
+No agendamento de um vídeo único, ative **Publicar como Reel de teste** e escolha como ele deve ser compartilhado depois:
+
+- **Manual**: o Reel não é enviado automaticamente para todos; você decide depois se o compartilha.
+- **Automático, se o desempenho for bom**: a Meta pode promovê-lo automaticamente para todos, conforme os sinais que ela usar.
+
+O OpenReply envia `trial_params` com a estratégia escolhida. Trial Reels precisam ser um único vídeo; fotos e carrosséis não são aceitos. Eles começam fora do feed, então a opção normal **Mostrar também no feed** fica desativada nesse modo. Para Reels comuns, `share_to_feed` continua controlando se a publicação também aparece no feed. A conexão Instagram Login precisa conceder `instagram_business_content_publish` para publicar e `instagram_business_manage_insights` para consultar métricas; no Facebook Login, os nomes equivalentes são `instagram_content_publish` e `instagram_manage_insights`, junto das permissões de Página exigidas pelo fluxo. Consulte a [referência da API usada no projeto](https://github.com/moboutrig/instagram-claude-skill/blob/main/references/api_reference.md) e a [documentação de publicação de Reels da Meta](https://www.postman.com/meta/workspace/instagram/documentation/23987686-9386f468-7714-490f-9bfc-9442db5c8f00).
+
+Depois da publicação, a Visão geral inclui o Reel de teste pelo ID retornado pela Meta e consulta as métricas disponíveis. A Meta pode levar algum tempo para liberá-las ou não disponibilizá-las para aquela publicação/conta. Nesse caso, a tabela informa que não há métricas retornadas e deixa os valores como traço, em vez de tratar a ausência como zero. A publicação também depende de a conta estar habilitada para Trial Reels e das permissões de conteúdo e insights do app.
+
+O campo `location_id` é opcional na API, mas o OpenReply ainda não oferece busca nem seleção de localização. Para publicar um Trial Reel sem localização, deixe esse campo de fora; não use o nome do local no lugar do ID aceito pela Meta.
+
+### 3. Criar o DNS no Cloudflare
+
+1. No DNS da zona, crie um registro `A` para `reply` apontando para o IP público do servidor Docker.
+2. Deixe o proxy da Cloudflare ativo se o Traefik estiver configurado para aceitar o tráfego HTTPS de origem.
+3. Aguarde a propagação e abra `https://reply.iafotos.com.br/api/health` antes de configurar a Meta.
+4. Caso o Traefik já tenha certificado TLS automático, não é necessário expor a porta da aplicação; ele encaminha internamente para a porta `3000` do container `web`.
+
+### 4. Atualizar uma versão
+
+Após alterar o código ou atualizar o repositório no servidor, execute:
+
+```bash
+cd /opt/openreply
+docker compose -f docker-compose.yml -f docker-compose.server.yml build web
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --force-recreate web worker
+curl -fsS https://reply.iafotos.com.br/api/health
+```
+
+Não use `docker compose` sem os dois arquivos nessa implantação: o arquivo base contém os bancos, enquanto o arquivo de servidor define `web` e `worker`.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` for local work, or set these in Vercel and Railway for hosting.
@@ -92,6 +239,7 @@ Copy `.env.example` to `.env` for local work, or set these in Vercel and Railway
 | `ENCRYPTION_KEY` | 32-byte hex. `openssl rand -hex 32`. Encrypts Instagram tokens. Identical across web and worker. |
 | `DATABASE_URL` | PostgreSQL connection string. Public Railway URL on Vercel; internal on the worker. |
 | `REDIS_URL` | Redis connection string. Must support blocking commands, so an HTTP-only Redis will not work with BullMQ. |
+| `MEDIA_STORAGE_DIR` | Directory for photos and videos. Defaults to the system temporary directory for local development; set a persistent shared volume for production, mounted at the same path in the web app and worker. |
 | `RESEND_API_KEY` | Resend key. Login is email magic links only, so without this nobody can sign in. |
 | `EMAIL_FROM` | A sender on a domain you verified in Resend. The placeholder will not deliver. |
 | `ALLOWED_EMAILS` | Optional. Comma-separated allowlist of addresses that may sign in, case insensitive. Unset, anyone who reaches your public URL can request a magic link and gets their own workspace, which is worth closing on an instance you run for yourself. |
@@ -99,7 +247,9 @@ Copy `.env.example` to `.env` for local work, or set these in Vercel and Railway
 | `META_GRAPH_API_VERSION` | Graph API version, for example `v25.0`. |
 | `INSTAGRAM_APP_ID` | From the Meta app, see Step 6. |
 | `INSTAGRAM_APP_SECRET` | From the Meta app. |
-| `FACEBOOK_APP_SECRET` | From the Meta app. |
+| `FACEBOOK_APP_ID` | App settings, Basic, App ID. |
+| `FACEBOOK_APP_SECRET` | App settings, Basic, App secret, click Show. |
+| `FACEBOOK_LOGIN_CONFIG_ID` | The Configuration ID created in Facebook Login for Business. |
 | `WEBHOOK_VERIFY_TOKEN` | Any random string. You paste the same value into Meta's webhook config. |
 
 `ENCRYPTION_KEY` must be exactly 64 hex characters or the app throws on boot.
@@ -158,6 +308,11 @@ Half two, on the Instagram side. This is the part that gets skipped. Open Instag
 
 Until you accept here, the account is not really a tester and the login will keep failing. If you do not see the invite, double-check you sent it to the exact username and that the account is a Business or Creator account.
 
+To schedule posts, the OAuth request also asks for `instagram_business_content_publish`. Existing connections need to
+reconnect from OpenReply Settings and accept that permission before the composer enables publishing. Accounts without
+the permission can still create drafts. Meta requires Advanced Access and review for accounts outside your app's
+roles.
+
 ### Step 7: Register the OAuth redirect
 
 In the Instagram product, open Set up Instagram business login, then Business login settings. In the OAuth redirect URIs field, add exactly, using your Vercel domain:
@@ -168,7 +323,26 @@ https://your-app.vercel.app/api/instagram/callback
 
 No trailing slash. If this is missing or wrong, connecting an account fails with a redirect_uri mismatch. You can register more than one, which is useful if you change domains later; keep the old and new both listed.
 
+For the Docker + Cloudflare deployment documented above, the exact value is:
+
+```
+https://reply.iafotos.com.br/api/instagram/callback
+```
+
 You do not need the "Embed URL" that Meta shows here. OpenReply builds its own login URL. Users connect by opening your app, going to Settings, and clicking Connect Instagram.
+
+### OAuth token flow: do not version the token-exchange endpoint
+
+Instagram Login returns a short-lived token from `https://api.instagram.com/oauth/access_token`. Exchange that token with:
+
+```
+GET https://graph.instagram.com/access_token
+grant_type=ig_exchange_token
+client_secret=INSTAGRAM_APP_SECRET
+access_token=SHORT_LIVED_TOKEN
+```
+
+The access-token exchange and refresh endpoints are unversioned. Profile calls, however, use the versioned Graph endpoint, for example `https://graph.instagram.com/v25.0/me`. Mixing these two URL forms leads to `Unsupported request` errors during connection. The deployed integration follows this pattern.
 
 ### Step 8: Configure the webhook
 
@@ -180,6 +354,12 @@ Still in the Instagram product, find the Configure webhooks step.
 - Subscribe to the `comments` field, and to `messages` as well.
 
 Both fields matter. `comments` carries comment-to-DM, which is what most people come here for. `messages` carries inbound DMs and Story replies, which is what a campaign's "also reply when someone DMs these words" toggle runs on. Subscribe to `comments` alone and that toggle looks enabled but never fires, because the events it needs are never delivered.
+
+For the Docker + Cloudflare deployment documented above, use this callback URL:
+
+```
+https://reply.iafotos.com.br/api/webhook
+```
 
 To test delivery without a real comment, click Test next to `comments`, then click Send to My Server. This is a two-step control. Clicking Test only previews the sample payload; the second button is what actually POSTs it to your endpoint. After sending, a row should appear in your `WebhookEvent` table.
 
@@ -222,6 +402,32 @@ The fix for your own accounts is the same two-part dance as Step 6, once per acc
 You do not have to do anything here; OpenReply handles it. It is worth understanding because it is invisible when it goes wrong.
 
 Meta's `/me` returns two IDs. The `id` field is app-scoped. The `user_id` field is the Instagram professional account ID. Webhooks put `user_id` in `entry.id`, and the messaging API keys off `user_id` too. OpenReply stores `user_id`, so a fresh connection matches correctly. If you upgraded from a very old build and an account was stored with the wrong ID, disconnect and reconnect it once.
+
+## Facebook Login, Páginas e insights do Instagram
+
+O login atual do Instagram continua funcionando para comentários e DMs. Porém, o produto **Instagram API com Instagram Login** não entrega todos os insights. Para métricas como alcance, visualizações, salvos e compartilhamentos, use também o **Facebook Login** e conecte a Página que está vinculada ao perfil profissional do Instagram.
+
+1. Em **Meta for Developers**, configure o produto **Facebook Login for Business**. Em **Configurações do app > Básico**, adicione `reply.iafotos.com.br` em **Domínios do aplicativo** e cadastre a plataforma **Website** com a URL `https://reply.iafotos.com.br`.
+2. Em **Valid OAuth Redirect URIs**, inclua exatamente:
+
+   ```
+   https://reply.iafotos.com.br/api/facebook/callback
+   ```
+
+3. Crie uma configuração do tipo **Geral** com **Token de acesso do usuário**. Selecione `instagram_basic`, `instagram_manage_comments`, `instagram_manage_messages`, `instagram_manage_insights`, `pages_show_list`, `pages_read_engagement` e `pages_manage_metadata`. Copie o **Configuration ID** gerado.
+4. No ambiente do servidor, defina `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` e `FACEBOOK_LOGIN_CONFIG_ID` (o Configuration ID). O segredo também assina os webhooks.
+5. No produto Webhooks, mantenha a URL única já usada pelo app:
+
+   ```
+   https://reply.iafotos.com.br/api/webhook
+   ```
+
+   Assine os campos de Página `messages`, `messaging_postbacks` e `feed`. Para o Instagram, mantenha `comments` e `messages`.
+6. Em **Configurações** do OpenReply, use **Conectar Facebook**, faça o login e escolha a Página correta. A escolha é explícita; o app não conecta todas as suas Páginas automaticamente.
+
+Em modo de desenvolvimento, a pessoa que fizer a autorização precisa ter uma função no app da Meta. Para clientes que não possuem função no app, essas permissões exigem Advanced Access e App Review.
+
+> A conexão da Página não substitui nem remove uma conexão existente do Instagram. A integração completa de automações de Messenger e a troca do token de Instagram para Facebook Login devem ser ativadas depois que os produtos, permissões e campos de webhook estiverem aprovados na Meta.
 
 ## Test it end to end
 

@@ -1,52 +1,83 @@
 @import "tailwindcss";
 
-/* ManyChat Alternative — Design System
-   Plain and functional. No gradients, glass, glow, or animation. */
+/* Paleta do painel: marfim, areia e terracota. */
+:root {
+  --ui-background: #f6f4ef;
+  --ui-foreground: #16181d;
+  --ui-surface: #ffffff;
+  --ui-surface-hover: #f8f6f1;
+  --ui-sidebar: #efece4;
+  --ui-border: #e2ddd1;
+  --ui-border-hover: #d6d0c2;
+  --ui-muted: #5e6068;
+  --ui-accent: #c23e17;
+  --ui-accent-hover: #a93414;
+  --ui-success: #1e6b44;
+  --ui-error: #a3211a;
+  --ui-warning: #7a4f00;
+}
 
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #18181b;
-  --color-surface: #f7f7f8;
-  --color-surface-hover: #efeff1;
-  --color-border: #e4e4e7;
-  --color-border-hover: #d4d4d8;
-  --color-muted: #71717a;
-  --color-accent: #f97316;
-  --color-accent-hover: #ea580c;
-  --color-success: #16a34a;
-  --color-error: #dc2626;
-  --color-warning: #d97706;
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --color-background: var(--ui-background);
+  --color-foreground: var(--ui-foreground);
+  --color-surface: var(--ui-surface);
+  --color-surface-hover: var(--ui-surface-hover);
+  --color-sidebar: var(--ui-sidebar);
+  --color-border: var(--ui-border);
+  --color-border-hover: var(--ui-border-hover);
+  --color-muted: var(--ui-muted);
+  --color-accent: var(--ui-accent);
+  --color-accent-hover: var(--ui-accent-hover);
+  --color-success: var(--ui-success);
+  --color-error: var(--ui-error);
+  --color-warning: var(--ui-warning);
+  --font-sans: var(--font-geist), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-bricolage), var(--font-geist), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 }
 
 html {
   color-scheme: light;
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
+  min-width: 320px;
+  background: var(--ui-background);
+  color: var(--ui-foreground);
+  font-family: var(--font-geist), system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "tnum" 1;
 }
 
-/* Focus ring — visible, for keyboard users. */
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+
+/* Os títulos da área autenticada usam a mesma família da referência visual. */
+.dashboard-shell h1 {
+  font-family: var(--font-bricolage), var(--font-geist), system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+/* Anel de foco visível para navegação por teclado. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--ui-accent);
   outline-offset: 2px;
 }
 
-/* Form fields already have a border, so keep the focus ring hugging the
-   field instead of bleeding up toward the label above it. */
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline-offset: 1px;
 }
 
-/* iOS Safari zooms the whole page in when a focused field's text is under 16px,
-   and never zooms back out. Fields are text-sm (14px) throughout, so raise them
-   to 16px on phones and leave the desktop sizing alone. */
 @media (max-width: 640px) {
   input,
   textarea,
@@ -55,18 +86,40 @@ select:focus-visible {
   }
 }
 
-/* Panel — flat container. Replaces .glass / .glass-strong. */
-.panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+button:not(:disabled),
+a[href] {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
-/* Kept as no-op aliases so existing markup degrades to plain surfaces
-   instead of breaking. Prefer .panel in new code. */
+button:not(:disabled):active,
+a[href]:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Superfícies usadas nos painéis e formulários. */
+.panel {
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  background: var(--ui-surface);
+  box-shadow: 0 1px 2px rgb(22 24 29 / 4%);
+}
+
+/* Aliases antigos continuam exibindo a superfície atual. */
 .glass,
 .glass-strong {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  background: var(--ui-surface);
+  box-shadow: 0 1px 2px rgb(22 24 29 / 4%);
 }
 
 .gradient-mesh {
@@ -81,6 +134,10 @@ select:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   *,
   *::before,
   *::after {

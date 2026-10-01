@@ -93,6 +93,7 @@ export async function GET(request: NextRequest) {
         accessToken: encryptedToken,
         tokenExpiresAt,
         webhookSubscribed,
+        publishingPermissionGranted: true,
       },
       update: {
         workspaceId: state.workspaceId,
@@ -101,6 +102,7 @@ export async function GET(request: NextRequest) {
         accessToken: encryptedToken,
         tokenExpiresAt,
         webhookSubscribed,
+        publishingPermissionGranted: true,
       },
     });
 

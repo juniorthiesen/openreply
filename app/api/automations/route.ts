@@ -15,6 +15,54 @@ import {
 // immediately), so never cache it at the route or CDN layer.
 export const dynamic = "force-dynamic";
 
+type CampaignRuleFields = {
+  matchAnyPost: boolean;
+  pendingNextReel: boolean;
+  postId?: string | null;
+  matchAnyWord: boolean;
+  keywords: string[];
+  openingDmEnabled: boolean;
+  openingDmMessage?: string | null;
+  openingDmButtonLabel?: string | null;
+};
+
+// Invariants every saved campaign must satisfy. POST checks the request body;
+// PATCH checks the existing row merged with the update, since a partial body
+// can break a rule on its own (e.g. enabling the opening DM with no message).
+function findCampaignRuleViolation(
+  d: CampaignRuleFields
+): { message: string; path: string } | null {
+  // A campaign must target a specific post, any post, or the next reel.
+  if (!d.matchAnyPost && !d.pendingNextReel && !d.postId) {
+    return { message: "Choose which post(s) trigger the campaign", path: "postId" };
+  }
+  // And it must match either specific words or any word.
+  if (!d.matchAnyWord && d.keywords.length === 0) {
+    return { message: "Add at least one keyword, or match any word", path: "keywords" };
+  }
+  // An opening DM needs both a message and a button label.
+  if (
+    d.openingDmEnabled &&
+    (!d.openingDmMessage?.trim() || !d.openingDmButtonLabel?.trim())
+  ) {
+    return {
+      message: "Opening DM needs a message and a button label",
+      path: "openingDmMessage",
+    };
+  }
+  return null;
+}
+
+function hasPublicReplyText(
+  messages?: string[] | null,
+  legacyMessage?: string | null
+): boolean {
+  return (
+    Boolean(legacyMessage?.trim()) ||
+    (messages ?? []).some((message) => Boolean(message.trim()))
+  );
+}
+
 const createAutomationSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -61,24 +109,22 @@ const createAutomationSchema = z
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
   })
-  // A campaign must target a specific post, any post, or the next reel.
-  .refine(
-    (d) => d.matchAnyPost || d.pendingNextReel || Boolean(d.postId),
-    { message: "Choose which post(s) trigger the campaign", path: ["postId"] }
-  )
-  // And it must match either specific words or any word.
-  .refine((d) => d.matchAnyWord || d.keywords.length >= 1, {
-    message: "Add at least one keyword, or match any word",
-    path: ["keywords"],
-  })
-  // An opening DM needs both a message and a button label.
-  .refine(
-    (d) =>
-      !d.openingDmEnabled ||
-      (Boolean(d.openingDmMessage?.trim()) &&
-        Boolean(d.openingDmButtonLabel?.trim())),
-    { message: "Opening DM needs a message and a button label", path: ["openingDmMessage"] }
-  );
+  .superRefine((d, ctx) => {
+    const violation = findCampaignRuleViolation(d);
+    if (violation) {
+      ctx.addIssue({ code: "custom", message: violation.message, path: [violation.path] });
+    }
+    if (
+      d.publicReplyEnabled &&
+      !hasPublicReplyText(d.publicReplyMessages, d.publicReplyMessage)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Adicione ao menos uma resposta pública ou desative essa opção.",
+        path: ["publicReplyMessages"],
+      });
+    }
+  });
 
 const updateAutomationSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -293,7 +339,7 @@ export async function POST(request: NextRequest) {
 
   const workspaceId = context.workspaceId;
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const parsed = createAutomationSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -471,7 +517,7 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const parsed = updateAutomationSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -534,6 +580,37 @@ export async function PATCH(request: NextRequest) {
   if (automationData.publicReplyEnabled === false) {
     automationData.publicReplyMessages = [];
     automationData.publicReplyMessage = null;
+  }
+
+  // Only an active campaign has to be valid: the worker ignores paused ones,
+  // and pausing must keep working even for a row saved before this check.
+  const merged = { ...existing, ...automationData };
+  if (
+    merged.publicReplyEnabled &&
+    !hasPublicReplyText(merged.publicReplyMessages, merged.publicReplyMessage)
+  ) {
+    const message =
+      "Adicione ao menos uma resposta pública ou desative essa opção.";
+    return NextResponse.json(
+      {
+        success: false,
+        error: message,
+        details: { fieldErrors: { publicReplyMessages: [message] } },
+      },
+      { status: 400 }
+    );
+  }
+
+  const violation = merged.isActive ? findCampaignRuleViolation(merged) : null;
+  if (violation) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: violation.message,
+        details: { fieldErrors: { [violation.path]: [violation.message] } },
+      },
+      { status: 400 }
+    );
   }
 
   const updated = await prisma.automation.update({

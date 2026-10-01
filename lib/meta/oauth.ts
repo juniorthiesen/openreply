@@ -5,7 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "crypto";
-import { getEncryptionKeyHex, requireEnv } from "@/lib/env";
+import { getEncryptionKeyHex, getMetaGraphApiVersion, requireEnv } from "@/lib/env";
 
 // Instagram API with Instagram Login authorizes on www.instagram.com. The old
 // api.instagram.com/oauth/authorize host belonged to the retired Basic Display
@@ -22,6 +22,7 @@ const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 interface OAuthStatePayload {
   workspaceId: string;
   ts: number;
+  provider?: "instagram" | "facebook";
 }
 
 function base64UrlEncode(value: string): string {
@@ -38,11 +39,33 @@ function signState(payload: string): string {
     .digest("base64url");
 }
 
-export function createOAuthState(workspaceId: string): string {
+export function createOAuthState(
+  workspaceId: string,
+  provider: OAuthStatePayload["provider"] = "instagram"
+): string {
   const payload = base64UrlEncode(
-    JSON.stringify({ workspaceId, ts: Date.now() } satisfies OAuthStatePayload)
+    JSON.stringify({ workspaceId, ts: Date.now(), provider } satisfies OAuthStatePayload)
   );
   return `${payload}.${signState(payload)}`;
+}
+
+/** Facebook Login is used for Page messaging and for Instagram insights.
+ * Keep its authorization path independent from Instagram Login so an existing
+ * Instagram-only installation continues to work unchanged. */
+export function getFacebookAuthorizationUrl(redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: requireEnv("FACEBOOK_APP_ID"),
+    // Facebook Login for Business binds granted Page/Instagram permissions to a
+    // dashboard configuration. The generic `scope` parameter bypasses that
+    // configuration and Meta rejects the dialog for an app that only has the
+    // Business Login product enabled.
+    config_id: requireEnv("FACEBOOK_LOGIN_CONFIG_ID"),
+    redirect_uri: redirectUri,
+    response_type: "code",
+    state,
+  });
+
+  return `https://www.facebook.com/${getMetaGraphApiVersion()}/dialog/oauth?${params.toString()}`;
 }
 
 export function verifyOAuthState(state: string | null): OAuthStatePayload | null {
@@ -79,7 +102,7 @@ export function getAuthorizationUrl(redirectUri: string, state: string): string 
     client_id: requireEnv("INSTAGRAM_APP_ID"),
     redirect_uri: redirectUri,
     scope:
-      "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_manage_insights",
+      "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_manage_insights,instagram_business_content_publish",
     response_type: "code",
     state,
   });
@@ -91,18 +114,20 @@ export async function exchangeCodeForToken(
   code: string,
   redirectUri: string
 ): Promise<{ accessToken: string; userId: string }> {
-  const body = new URLSearchParams({
-    client_id: requireEnv("INSTAGRAM_APP_ID"),
-    client_secret: requireEnv("INSTAGRAM_APP_SECRET"),
-    grant_type: "authorization_code",
-    redirect_uri: redirectUri,
-    code,
-  });
+  // The Instagram Login token endpoint expects multipart form data. Sending
+  // urlencoded data is accepted by the old Basic Display flow but is rejected
+  // by the Instagram API with Instagram Login as an unsupported GET request.
+  const body = new FormData();
+  body.set("client_id", requireEnv("INSTAGRAM_APP_ID"));
+  body.set("client_secret", requireEnv("INSTAGRAM_APP_SECRET"));
+  body.set("grant_type", "authorization_code");
+  body.set("redirect_uri", redirectUri);
+  body.set("code", code);
 
   const response = await fetch(INSTAGRAM_TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    // Do not set Content-Type manually: fetch adds the multipart boundary.
+    body,
   });
 
   if (!response.ok) {

@@ -78,12 +78,17 @@ model Workspace {
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
+  facebookPages     FacebookPage[]
+  facebookOAuthConnections FacebookOAuthConnection[]
   automations       Automation[]
   dmLogs            DmLog[]
   trackedLinks      TrackedLink[]
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  mediaAssets       MediaAsset[]
+  scheduledPosts    ScheduledPost[]
+  storySequences    StorySequence[]
 
   @@index([ownerId])
 }
@@ -133,6 +138,9 @@ model InstagramAccount {
   accessToken       String
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean  @default(false)
+  authProvider      InstagramAuthProvider @default(INSTAGRAM_LOGIN)
+  facebookPageId    String?
+  publishingPermissionGranted Boolean @default(false)
   connectedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -141,8 +149,73 @@ model InstagramAccount {
   dmLogs      DmLog[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  mediaAssets MediaAsset[]
+  scheduledPosts ScheduledPost[]
+  storySequences StorySequence[]
 
   @@index([workspaceId])
+}
+
+/// A Facebook Page connected through Facebook Login. Its page token is kept
+/// separately from Instagram so adding Facebook never changes an existing
+/// Instagram Login connection or its automations.
+model FacebookPage {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  facebookPageId    String   @unique
+  name              String
+  username          String?
+  accessToken       String
+  tokenExpiresAt    DateTime?
+  webhookSubscribed Boolean  @default(false)
+  connectedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// Uploaded media kept on persistent storage until the owner removes it. The
+/// public URL is signed from the asset id at request time so Meta can fetch the
+/// file without exposing the workspace's authenticated routes.
+model MediaAsset {
+  id                 String          @id @default(cuid())
+  workspaceId        String
+  instagramAccountId  String
+  fileName           String
+  contentType         String          @default("application/octet-stream")
+  storageKey          String          @unique
+  byteSize            Int
+  uploadedBytes       Int             @default(0)
+  status              MediaAssetStatus @default(UPLOADING)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  scheduledPosts  ScheduledPost[]
+  scheduledPostItems ScheduledPostMediaItem[]
+  storySlides StorySlide[]
+
+  @@index([workspaceId, instagramAccountId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// Short-lived handoff between the Facebook OAuth callback and the Page
+/// picker. Only the encrypted user token is retained, and it expires quickly.
+model FacebookOAuthConnection {
+  id          String   @id @default(cuid())
+  workspaceId String
+  accessToken String
+  pages       Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([expiresAt])
 }
 
 /// Daily follower total for one account. Instagram only retains ~30 days of
@@ -211,10 +284,131 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  scheduledPost    ScheduledPost?
 
   @@index([workspaceId])
   @@index([instagramAccountId])
   @@index([postId])
+}
+
+model ScheduledPost {
+  id                 String                @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  mediaAssetId       String
+  automationId       String?               @unique
+  mediaType          ScheduledPostMediaType
+  status             ScheduledPostStatus  @default(DRAFT)
+  caption            String                @default("") @db.Text
+  scheduledAt        DateTime?
+  timeZone           String                @default("UTC")
+  shareToFeed        Boolean               @default(true)
+  trialGraduationStrategy TrialReelGraduationStrategy?
+  containerId        String?
+  instagramMediaId   String?
+  permalink           String?
+  publishedAt        DateTime?
+  publishStartedAt   DateTime?
+  attempts           Int                   @default(0)
+  lastError          String?               @db.Text
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  workspace        Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  mediaAsset       MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+  automation       Automation?     @relation(fields: [automationId], references: [id], onDelete: SetNull)
+  mediaItems       ScheduledPostMediaItem[]
+
+  @@index([workspaceId, instagramAccountId, scheduledAt])
+  @@index([instagramAccountId, status, scheduledAt])
+  @@index([instagramAccountId, status, trialGraduationStrategy, publishedAt])
+  @@index([mediaAssetId])
+}
+
+/// Ordered media included in a scheduled Instagram carousel. The first item is
+/// also stored in ScheduledPost.mediaAssetId for compatibility with older code.
+model ScheduledPostMediaItem {
+  id              String  @id @default(cuid())
+  scheduledPostId String
+  mediaAssetId    String
+  position        Int
+  containerId     String?
+
+  scheduledPost ScheduledPost @relation(fields: [scheduledPostId], references: [id], onDelete: Cascade)
+  mediaAsset    MediaAsset    @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([scheduledPostId, position])
+  @@unique([scheduledPostId, mediaAssetId])
+  @@index([mediaAssetId])
+}
+
+/// An ordered set of individually published Instagram Stories.
+model StorySequence {
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  title              String              @default("Nova sequência")
+  status             StorySequenceStatus @default(DRAFT)
+  scheduledAt        DateTime?
+  timeZone           String              @default("UTC")
+  publishedAt        DateTime?
+  attempts           Int                 @default(0)
+  lastError          String?             @db.Text
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  slides           StorySlide[]
+
+  @@index([workspaceId, instagramAccountId, scheduledAt])
+  @@index([instagramAccountId, status, scheduledAt])
+}
+
+/// One Story frame. Each slide is published as a separate Instagram media item.
+model StorySlide {
+  id               String          @id @default(cuid())
+  sequenceId       String
+  mediaAssetId     String
+  position         Int
+  status           StorySlideStatus @default(PENDING)
+  containerId      String?
+  instagramMediaId String?         @unique
+  publishStartedAt DateTime?
+  publishedAt      DateTime?
+  lastError        String?         @db.Text
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  sequence   StorySequence          @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset             @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+  metrics    StoryMetricSnapshot[]
+
+  @@unique([sequenceId, position])
+  @@unique([sequenceId, mediaAssetId])
+  @@index([mediaAssetId])
+  @@index([sequenceId, status])
+  @@index([publishedAt])
+}
+
+/// Periodic snapshots preserve insights after Instagram stops returning them.
+model StoryMetricSnapshot {
+  id                String   @id @default(cuid())
+  storySlideId      String
+  capturedAt        DateTime @default(now())
+  reach             Int?
+  views             Int?
+  replies           Int?
+  shares            Int?
+  follows           Int?
+  profileVisits     Int?
+  totalInteractions Int?
+  navigation        Json?
+
+  storySlide StorySlide @relation(fields: [storySlideId], references: [id], onDelete: Cascade)
+
+  @@index([storySlideId, capturedAt])
 }
 
 model DmLog {
@@ -349,6 +543,53 @@ enum WorkspaceRole {
   OWNER
   ADMIN
   MEMBER
+}
+
+enum InstagramAuthProvider {
+  INSTAGRAM_LOGIN
+  FACEBOOK_LOGIN
+}
+
+enum MediaAssetStatus {
+  UPLOADING
+  READY
+}
+
+enum ScheduledPostMediaType {
+  IMAGE
+  REEL
+  CAROUSEL
+}
+
+enum TrialReelGraduationStrategy {
+  MANUAL
+  SS_PERFORMANCE
+}
+
+enum ScheduledPostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELED
+}
+
+enum StorySequenceStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  PARTIAL
+  FAILED
+  CANCELED
+}
+
+enum StorySlideStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
 }
 
 enum WorkspaceInvitationStatus {

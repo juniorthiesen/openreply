@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const parsed = inviteSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -183,7 +183,7 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const parsed = updateMemberSchema.safeParse(await request.json());
+  const parsed = updateMemberSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
       { success: false, error: "Invalid member update" },

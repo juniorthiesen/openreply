@@ -11,8 +11,6 @@ import { useSyncExternalStore } from "react";
 const DEMO_HOST = "openreply.diwen.dev";
 
 const DISMISS_KEY = "openreply:demo-notice-dismissed";
-const SETUP_DOCS_URL =
-  "https://github.com/diwenne/openreply/blob/main/docs/setup.md";
 
 /// Module-level so both variants agree, and so dismissing survives a
 /// client-side navigation between the landing page and the login page.
@@ -72,18 +70,9 @@ export function DemoNotice({ variant }: { variant: "banner" | "panel" }) {
     return (
       <div className="relative border-b border-orange-200 bg-orange-50">
         <p className="mx-auto w-full max-w-6xl px-10 py-2 text-center text-xs leading-5 text-zinc-700 sm:px-14 sm:text-sm">
-          <span className="font-bold text-zinc-900">{DEMO_HOST}</span> is a
-          demo. OpenReply is self-hosted — signing in here will not send DMs for
-          your account.{" "}
-          <a
-            href={SETUP_DOCS_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="font-bold text-orange-700 underline underline-offset-2 transition hover:text-orange-800"
-          >
-            Deploy your own copy
-          </a>
-          .
+          Esta é uma instância de demonstração. Entrar aqui não enviará mensagens
+          pela sua conta do Instagram. Para operar sua conta, use o espaço de
+          trabalho configurado pela sua equipe.
         </p>
         <button
           type="button"
@@ -100,19 +89,10 @@ export function DemoNotice({ variant }: { variant: "banner" | "panel" }) {
   return (
     <div className="relative mb-5 rounded border border-warning/30 bg-warning/10 px-4 py-3 pr-10">
       <p className="text-sm leading-6 text-foreground">
-        <span className="font-semibold">{DEMO_HOST} is a demo instance.</span>{" "}
-        Signing in here will not send DMs for your Instagram account. OpenReply
-        is self-hosted, so it only works on a deployment you run yourself, with
-        your own Meta app and your own domain.{" "}
-        <a
-          href={SETUP_DOCS_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="font-semibold text-warning underline underline-offset-2"
-        >
-          Read the setup guide
-        </a>
-        .
+        <span className="font-semibold">Esta é uma instância de demonstração.</span>{" "}
+        Entrar aqui não enviará mensagens pela sua conta do Instagram. Para usar
+        as campanhas da sua empresa, entre no espaço de trabalho configurado
+        pela sua equipe.
       </p>
       <button
         type="button"

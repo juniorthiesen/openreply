@@ -102,16 +102,38 @@ day. Five minutes is deliberate — on Vercel this runs daily, which means a
 campaign prepared before publishing stays inactive for the whole first evening,
 when most of the comments arrive.
 
+## Gotcha #5 — The publisher needs a shared media volume
+
+The web app accepts photos and videos, then the worker sends their public URL
+to Instagram. Both containers need the same persistent files at the same path.
+Without a shared volume, an upload can appear to finish in the dashboard while
+the worker cannot find it. A container's writable layer is also lost when
+Dokploy replaces that container during a deploy.
+
+Set `MEDIA_STORAGE_DIR=/data/media` on both Applications and mount the same
+host directory in both containers, for example:
+
+```text
+/opt/openreply/media:/data/media
+```
+
+Create `/opt/openreply/media` on the server before the first deployment. In
+Dokploy's volume settings, use that exact host path for both the web and worker
+Applications. Do not create a separately named volume for each Application.
+The uploader sends files as blocks smaller than 8 MB, so each request stays
+below the usual proxied upload limit.
+
 ## Step-by-step
 
 1. Fork this repo.
 2. In Dokploy: **Create → Database → PostgreSQL** and **Create → Database → Redis**. Note their internal service hostnames.
 3. In Dokploy: **Create → Application**, connect your fork, `main` branch. This is the web app.
-4. Add the `nixpacks.toml` file (Gotcha #1) to your fork's root, and set the environment variables from Gotchas #1 and #2 (web app version) plus the standard variables from `.env.example` — pointing `DATABASE_URL` and `REDIS_URL` at the internal hostnames from step 2.
+4. Add the `nixpacks.toml` file (Gotcha #1) to your fork's root, and set the environment variables from Gotchas #1 and #2 (web app version) plus the standard variables from `.env.example` — pointing `DATABASE_URL` and `REDIS_URL` at the internal hostnames from step 2. Set `MEDIA_STORAGE_DIR=/data/media` and mount the same persistent host directory in both applications as described in Gotcha #5.
 5. Assign a domain to the web app only (not the worker) in Dokploy's Domains section, container port `3000`. This becomes your `NEXTAUTH_URL`.
-6. Repeat step 3 for a second Application — this is the worker. Use the worker's build/start commands from Gotcha #2, and the same full set of environment variables as the web app, especially `DATABASE_URL`, `REDIS_URL`, and `ENCRYPTION_KEY` (these three must match exactly between both apps, or DM sends will fail to decrypt).
+6. Repeat step 3 for a second Application — this is the worker. Use the worker's build/start commands from Gotcha #2, and the same full set of environment variables as the web app, especially `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, and `MEDIA_STORAGE_DIR` (the media directory must point to the same shared mount).
 7. Deploy both apps.
 8. Add the cron service from Gotcha #4, so the scheduled jobs actually run.
 9. Check `https://your-domain/api/health` — confirms database, Redis, queue, and worker heartbeat are all healthy.
+10. Existing Instagram connections must reconnect and grant `instagram_business_content_publish` before they can schedule posts. Verify that the web and worker containers both see the shared media volume before testing a publication.
 
 From here, the Meta app setup, OAuth redirect, and webhook configuration are identical to the standard setup in `docs/setup.md`.

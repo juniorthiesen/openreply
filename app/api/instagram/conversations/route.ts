@@ -7,11 +7,15 @@ import {
   MetaApiError,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
+import { messagePreviewText } from "@/lib/inbox";
 
 export interface ConversationListItem {
   id: string;
   contact: { id: string; username: string | null };
   updatedTime: string | null;
+  unreadCount: number | null;
+  lastIncomingTime: string | null;
+  lastMessageFromMe: boolean | null;
   lastMessage: {
     text: string;
     fromMe: boolean;
@@ -49,24 +53,38 @@ export async function GET(request: NextRequest) {
     const accessToken = decryptToken(account.accessToken);
     const raw = await getConversations(accessToken, account.instagramId);
 
-    const conversations: ConversationListItem[] = raw.map((c) => {
-      const participants = c.participants?.data ?? [];
+    const conversations: ConversationListItem[] = raw.map((conversation) => {
+      const participants = conversation.participants?.data ?? [];
       const contact =
-        participants.find((p) => p.id !== account.instagramId) ??
+        participants.find((participant) => participant.id !== account.instagramId) ??
         participants[0] ??
         null;
-      const last = c.messages?.data?.[0] ?? null;
+      const messages = conversation.messages?.data ?? [];
+      const last = messages[0] ?? null;
+      const lastIncoming =
+        messages.find((message) => message.from?.id !== account.instagramId) ?? null;
 
       return {
-        id: c.id,
+        id: conversation.id,
         contact: {
           id: contact?.id ?? "",
           username: contact?.username ?? null,
         },
-        updatedTime: c.updated_time ?? null,
+        updatedTime: conversation.updated_time ?? null,
+        unreadCount:
+          typeof conversation.unread_count === "number"
+            ? conversation.unread_count
+            : null,
+        lastIncomingTime: lastIncoming?.created_time ?? null,
+        lastMessageFromMe: last
+          ? last.from?.id === account.instagramId
+          : null,
         lastMessage: last
           ? {
-              text: last.message ?? "",
+              text: messagePreviewText({
+                text: last.message,
+                attachments: last.attachments?.data,
+              }),
               fromMe: last.from?.id === account.instagramId,
               createdTime: last.created_time ?? null,
             }
@@ -143,8 +161,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     console.error("[Conversations] Send error:", err);
-    // Surface Meta's own message — the common case is the 24-hour messaging
-    // window having closed, which the user needs to see explicitly.
     const message =
       err instanceof MetaApiError ? err.message : "Failed to send message";
     return NextResponse.json({ success: false, error: message }, { status: 502 });

@@ -1,4 +1,5 @@
 import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
+import type { TrialReelGraduationStrategy } from "@/lib/scheduling/trial-reels";
 
 function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
@@ -92,6 +93,12 @@ export interface InstagramMedia {
   comments_count?: number;
 }
 
+export interface InstagramMediaContainerStatus {
+  id: string;
+  status_code?: string;
+  status?: string;
+}
+
 export interface InstagramMediaInsights {
   views?: number;
   reach?: number;
@@ -102,10 +109,39 @@ export interface InstagramMediaInsights {
   total_interactions?: number;
 }
 
+export interface InstagramStoryInsights {
+  reach?: number;
+  views?: number;
+  replies?: number;
+  shares?: number;
+  follows?: number;
+  profile_visits?: number;
+  total_interactions?: number;
+  navigation?: Record<string, number>;
+}
+
 interface TokenResponse {
   access_token: string;
   token_type?: string;
   expires_in?: number;
+}
+
+export interface FacebookManagedPage {
+  id: string;
+  name: string;
+  access_token: string;
+  username?: string;
+  instagram_business_account?: {
+    id: string;
+    username?: string;
+  };
+}
+
+export interface FacebookPageCandidate {
+  id: string;
+  name: string;
+  username?: string;
+  instagramBusinessAccount?: { id: string; username?: string };
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -497,18 +533,30 @@ export interface InstagramMessage {
   message?: string;
   from?: InstagramParticipant;
   to?: { data: InstagramParticipant[] };
+  attachments?: { data?: InstagramMessageAttachment[] };
+}
+
+export interface InstagramMessageAttachment {
+  type?: string;
+  name?: string;
+  url?: string;
+  file_url?: string;
+  payload?: { url?: string; title?: string; sticker_id?: string };
+  image_data?: { url?: string };
+  video_data?: { url?: string };
 }
 
 export interface InstagramConversation {
   id: string;
   updated_time?: string;
+  unread_count?: number;
   participants?: { data: InstagramParticipant[] };
   messages?: { data: InstagramMessage[] };
 }
 
 /**
  * List the account's DM conversations, newest first, each with its participants
- * and a one-message preview. `igUserId` is the account's professional user_id
+ * and recent-message preview. `igUserId` is the account's professional user_id
  * (the same id used to send messages and as webhook entry.id).
  */
 export async function getConversations(
@@ -517,15 +565,30 @@ export async function getConversations(
 ): Promise<InstagramConversation[]> {
   const url = new URL(`${instagramGraphBase()}/${igUserId}/conversations`);
   url.searchParams.set("platform", "instagram");
-  url.searchParams.set(
-    "fields",
-    "participants,updated_time,messages.limit(1){message,from,created_time}"
-  );
+  const fieldsWithUnread =
+    "participants,updated_time,unread_count,messages.limit(20){id,message,from,created_time,attachments}";
+  const fieldsWithoutUnread =
+    "participants,updated_time,messages.limit(20){id,message,from,created_time,attachments}";
   url.searchParams.set("limit", "50");
   url.searchParams.set("access_token", accessToken);
 
-  const response = await fetch(url.toString());
-  const data = await handleResponse<{ data: InstagramConversation[] }>(response);
+  url.searchParams.set("fields", fieldsWithUnread);
+  let data: { data: InstagramConversation[] };
+  try {
+    data = await handleResponse<{ data: InstagramConversation[] }>(
+      await fetch(url.toString())
+    );
+  } catch (error) {
+    // Some Instagram Login app configurations don't expose unread_count. Keep
+    // the inbox usable and derive unread state from the newest inbound message.
+    if (!(error instanceof MetaApiError) || error.code !== 100 || !/unread_count/i.test(error.message)) {
+      throw error;
+    }
+    url.searchParams.set("fields", fieldsWithoutUnread);
+    data = await handleResponse<{ data: InstagramConversation[] }>(
+      await fetch(url.toString())
+    );
+  }
   return data.data ?? [];
 }
 
@@ -538,7 +601,10 @@ export async function getConversationMessages(
   conversationId: string
 ): Promise<InstagramMessage[]> {
   const url = new URL(`${instagramGraphBase()}/${conversationId}`);
-  url.searchParams.set("fields", "messages{id,created_time,from,to,message}");
+  url.searchParams.set(
+    "fields",
+    "messages{id,created_time,from,to,message,attachments}"
+  );
   url.searchParams.set("access_token", accessToken);
 
   const response = await fetch(url.toString());
@@ -546,6 +612,30 @@ export async function getConversationMessages(
     response
   );
   return data.messages?.data ?? [];
+}
+
+/** Tell Instagram that the selected conversation has been seen. */
+export async function markInstagramConversationSeen(
+  accessToken: string,
+  instagramAccountId: string,
+  userId: string
+): Promise<void> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { id: userId },
+        sender_action: "mark_seen",
+      }),
+    }
+  );
+
+  await handleResponse(response);
 }
 
 export async function getUserInfo(accessToken: string): Promise<InstagramUser> {
@@ -580,6 +670,26 @@ export async function getUserMedia(
   return data.data;
 }
 
+export interface InstagramStoryMedia {
+  id: string;
+  media_type?: string;
+  timestamp: string;
+}
+
+/** Return the account's currently active Stories for publish recovery. */
+export async function getActiveFacebookInstagramStories(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<InstagramStoryMedia[]> {
+  const url = new URL(`${facebookGraphBase()}/${instagramAccountId}/stories`);
+  url.searchParams.set("fields", "id,media_type,timestamp");
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("access_token", accessToken);
+  const response = await fetch(url.toString());
+  const data = await handleResponse<{ data: InstagramStoryMedia[] }>(response);
+  return data.data ?? [];
+}
+
 /**
  * Fetch media by following pagination cursors until `max` items are collected
  * or there are no more pages. Pass a large `max` for an "all time" view; the
@@ -612,6 +722,213 @@ export async function getAllUserMedia(
   return results.slice(0, max);
 }
 
+/** Create a Meta media container for a scheduled feed photo or Reel. */
+export async function createInstagramMediaContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  options: {
+    mediaUrl: string;
+    mediaType: "IMAGE" | "REEL";
+    caption: string;
+    shareToFeed: boolean;
+    trialGraduationStrategy?: TrialReelGraduationStrategy | null;
+  }
+): Promise<{ id: string }> {
+  const body = new URLSearchParams();
+  body.set("caption", options.caption);
+  if (options.mediaType === "IMAGE") {
+    body.set("image_url", options.mediaUrl);
+  } else {
+    body.set("media_type", "REELS");
+    body.set("video_url", options.mediaUrl);
+    body.set(
+      "share_to_feed",
+      String(options.trialGraduationStrategy ? false : options.shareToFeed)
+    );
+    if (options.trialGraduationStrategy) {
+      body.set(
+        "trial_params",
+        JSON.stringify({
+          graduation_strategy: options.trialGraduationStrategy,
+        })
+      );
+    }
+  }
+
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/media`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    }
+  );
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Create a single media container marked as an item in an Instagram carousel. */
+export async function createInstagramCarouselItemContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  options: { mediaUrl: string; mediaType: "IMAGE" | "VIDEO" }
+): Promise<{ id: string }> {
+  const body = new URLSearchParams({ is_carousel_item: "true" });
+  if (options.mediaType === "IMAGE") {
+    body.set("image_url", options.mediaUrl);
+  } else {
+    body.set("media_type", "VIDEO");
+    body.set("video_url", options.mediaUrl);
+  }
+
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/media`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    }
+  );
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Assemble processed item containers into the parent carousel container. */
+export async function createInstagramCarouselContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  options: { childContainerIds: string[]; caption: string }
+): Promise<{ id: string }> {
+  const body = new URLSearchParams({
+    media_type: "CAROUSEL",
+    children: options.childContainerIds.join(","),
+    caption: options.caption,
+  });
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/media`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    }
+  );
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Return the professional Instagram account linked to a Facebook Page. */
+export async function getFacebookPageInstagramAccount(
+  accessToken: string,
+  pageId: string
+): Promise<{ id: string; username?: string } | null> {
+  const url = new URL(`${facebookGraphBase()}/${pageId}`);
+  url.searchParams.set("fields", "instagram_business_account{id,username}");
+  url.searchParams.set("access_token", accessToken);
+  const response = await fetch(url.toString());
+  const data = await handleResponse<{ instagram_business_account?: { id: string; username?: string } }>(response);
+  return data.instagram_business_account ?? null;
+}
+
+/** Create one Instagram Story container through Facebook Login and a Page token. */
+export async function createFacebookInstagramStoryContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  options: { mediaUrl: string; mediaType: "IMAGE" | "VIDEO" }
+): Promise<{ id: string }> {
+  const body = new URLSearchParams({ media_type: "STORIES" });
+  body.set(options.mediaType === "IMAGE" ? "image_url" : "video_url", options.mediaUrl);
+
+  const response = await fetch(
+    `${facebookGraphBase()}/${instagramAccountId}/media`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    }
+  );
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Check Story-container readiness through the Facebook Login API. */
+export async function getFacebookInstagramStoryContainerStatus(
+  accessToken: string,
+  containerId: string
+): Promise<InstagramMediaContainerStatus> {
+  const url = new URL(`${facebookGraphBase()}/${containerId}`);
+  url.searchParams.set("fields", "status_code,status");
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  return handleResponse<InstagramMediaContainerStatus>(response);
+}
+
+/** Publish one processed Story container through Facebook Login. */
+export async function publishFacebookInstagramStoryContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  containerId: string
+): Promise<{ id: string }> {
+  const response = await fetch(`${facebookGraphBase()}/${instagramAccountId}/media_publish`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ creation_id: containerId }),
+  });
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Ask Meta whether the media container has finished processing. */
+export async function getInstagramMediaContainerStatus(
+  accessToken: string,
+  containerId: string
+): Promise<InstagramMediaContainerStatus> {
+  const url = new URL(`${instagramGraphBase()}/${containerId}`);
+  url.searchParams.set("fields", "status_code,status");
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return handleResponse<InstagramMediaContainerStatus>(response);
+}
+
+/** Publish a processed media container to the connected Instagram account. */
+export async function publishInstagramMediaContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  containerId: string
+): Promise<{ id: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/media_publish`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ creation_id: containerId }),
+    }
+  );
+  return handleResponse<{ id: string }>(response);
+}
+
+/** Fetch the permalink for a newly published item for the planner UI. */
+export async function getInstagramMediaPermalink(
+  accessToken: string,
+  mediaId: string
+): Promise<{ id: string; permalink?: string }> {
+  const url = new URL(`${instagramGraphBase()}/${mediaId}`);
+  url.searchParams.set("fields", "id,permalink");
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return handleResponse<{ id: string; permalink?: string }>(response);
+}
+
 /**
  * Fetch per-media insight metrics (views, reach, saved, shares, etc.).
  *
@@ -636,9 +953,77 @@ export async function getMediaInsights(
 
   const result: InstagramMediaInsights = {};
   for (const entry of data.data) {
-    result[entry.name as keyof InstagramMediaInsights] =
-      entry.values?.[0]?.value ?? 0;
+    const value = entry.values?.[0]?.value;
+    if (typeof value === "number") {
+      result[entry.name as keyof InstagramMediaInsights] = value;
+    }
   }
+  return result;
+}
+
+function firstInsightValue(entry: {
+  values?: Array<{ value?: number | Record<string, number> }>;
+  total_value?: { value?: number | Record<string, number> };
+}): number | Record<string, number> | undefined {
+  return entry.values?.[0]?.value ?? entry.total_value?.value;
+}
+
+/** Fetch Story metrics. Navigation is requested separately because Meta requires its breakdown. */
+export async function getInstagramStoryInsights(
+  accessToken: string,
+  storyMediaId: string
+): Promise<InstagramStoryInsights> {
+  const metrics = [
+    "reach",
+    "views",
+    "replies",
+    "shares",
+    "follows",
+    "profile_visits",
+    "total_interactions",
+  ];
+  const summaryUrl = new URL(`${facebookGraphBase()}/${storyMediaId}/insights`);
+  summaryUrl.searchParams.set("metric", metrics.join(","));
+  summaryUrl.searchParams.set("access_token", accessToken);
+
+  const summaryResponse = await fetch(summaryUrl.toString());
+  const summary = await handleResponse<{
+    data: Array<{
+      name: string;
+      values?: Array<{ value?: number | Record<string, number> }>;
+      total_value?: { value?: number | Record<string, number> };
+    }>;
+  }>(summaryResponse);
+
+  const result: InstagramStoryInsights = {};
+  for (const entry of summary.data) {
+    const value = firstInsightValue(entry);
+    if (typeof value === "number") {
+      result[entry.name as keyof Omit<InstagramStoryInsights, "navigation">] = value;
+    }
+  }
+
+  const navigationUrl = new URL(`${facebookGraphBase()}/${storyMediaId}/insights`);
+  navigationUrl.searchParams.set("metric", "navigation");
+  navigationUrl.searchParams.set("breakdown", "story_navigation_action_type");
+  navigationUrl.searchParams.set("access_token", accessToken);
+  const navigationResponse = await fetch(navigationUrl.toString());
+  const navigation = await handleResponse<{
+    data: Array<{
+      name: string;
+      values?: Array<{ value?: number | Record<string, number> }>;
+      total_value?: { value?: number | Record<string, number> };
+    }>;
+  }>(navigationResponse);
+  const navigationValue = firstInsightValue(
+    navigation.data.find((entry) => entry.name === "navigation") ?? {}
+  );
+  if (navigationValue && typeof navigationValue === "object") {
+    result.navigation = Object.fromEntries(
+      Object.entries(navigationValue).map(([key, value]) => [key.toLowerCase(), value])
+    );
+  }
+
   return result;
 }
 
@@ -714,13 +1099,29 @@ export async function getFollowerCountSeries(
 export async function getLongLivedToken(
   shortLivedToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
-  const url = new URL(`${instagramGraphBase()}/access_token`);
-  url.searchParams.set("grant_type", "ig_exchange_token");
-  url.searchParams.set("client_secret", requireEnv("INSTAGRAM_APP_SECRET"));
-  url.searchParams.set("access_token", shortLivedToken);
+  // Meta documents this exchange on the unversioned endpoint, but it has been
+  // seen rejecting real tokens with "Unsupported request - method type: get"
+  // (code 100) while the versioned path accepts them, and vice versa. Try the
+  // documented one first and fall back to the versioned one on that error.
+  const exchange = async (base: string) => {
+    const url = new URL(`${base}/access_token`);
+    url.searchParams.set("grant_type", "ig_exchange_token");
+    url.searchParams.set("client_secret", requireEnv("INSTAGRAM_APP_SECRET"));
+    url.searchParams.set("access_token", shortLivedToken);
+    return handleResponse<TokenResponse>(await fetch(url.toString()));
+  };
 
-  const response = await fetch(url.toString());
-  const data = await handleResponse<TokenResponse>(response);
+  let data: TokenResponse;
+  try {
+    data = await exchange("https://graph.instagram.com");
+  } catch (err) {
+    if (!(err instanceof PermissionError)) throw err;
+    console.warn(
+      "[Instagram] Unversioned long-lived token exchange rejected, retrying versioned:",
+      err.message
+    );
+    data = await exchange(instagramGraphBase());
+  }
 
   return {
     accessToken: data.access_token,
@@ -770,5 +1171,75 @@ export async function debugToken(inputToken: string, accessToken: string) {
   url.searchParams.set("input_token", inputToken);
   url.searchParams.set("access_token", accessToken);
   const response = await fetch(url.toString());
+  return handleResponse(response);
+}
+
+/** Exchange a Facebook Login code for a user token. The user token is only
+ * retained for the short Page-picker handoff; Page tokens are what we persist.
+ */
+export async function exchangeFacebookCodeForToken(
+  code: string,
+  redirectUri: string
+): Promise<{ accessToken: string; expiresIn: number }> {
+  const url = new URL(`${facebookGraphBase()}/oauth/access_token`);
+  url.searchParams.set("client_id", requireEnv("FACEBOOK_APP_ID"));
+  url.searchParams.set("client_secret", requireEnv("FACEBOOK_APP_SECRET"));
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("code", code);
+
+  const response = await fetch(url.toString());
+  const data = await handleResponse<TokenResponse>(response);
+  return { accessToken: data.access_token, expiresIn: data.expires_in ?? 3600 };
+}
+
+/** Return Pages that the logged-in Facebook user can manage, including their
+ * linked professional Instagram account when one is present. */
+export async function getFacebookManagedPages(
+  userAccessToken: string
+): Promise<FacebookManagedPage[]> {
+  const url = new URL(`${facebookGraphBase()}/me/accounts`);
+  url.searchParams.set(
+    "fields",
+    "id,name,username,access_token,instagram_business_account{id,username}"
+  );
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("access_token", userAccessToken);
+
+  const response = await fetch(url.toString());
+  const data = await handleResponse<{ data?: FacebookManagedPage[] }>(response);
+  return data.data ?? [];
+}
+
+export function toFacebookPageCandidate(page: FacebookManagedPage): FacebookPageCandidate {
+  return {
+    id: page.id,
+    name: page.name,
+    username: page.username,
+    instagramBusinessAccount: page.instagram_business_account
+      ? {
+          id: page.instagram_business_account.id,
+          username: page.instagram_business_account.username,
+        }
+      : undefined,
+  };
+}
+
+/** Subscribe this Page to the app's webhook fields. Facebook delivers both
+ * Page Messenger events and the Page feed through the shared webhook URL. */
+export async function subscribeFacebookPageToWebhooks(
+  pageId: string,
+  pageAccessToken: string
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${facebookGraphBase()}/${pageId}/subscribed_apps`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${pageAccessToken}`,
+    },
+    body: JSON.stringify({
+      subscribed_fields: ["messages", "messaging_postbacks", "feed"],
+    }),
+  });
+
   return handleResponse(response);
 }

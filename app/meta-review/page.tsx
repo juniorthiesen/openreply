@@ -2,45 +2,47 @@ import type { Metadata } from "next";
 import LegalShell from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: "Meta App Review Support - OpenReply",
+  title: "Suporte para análise do app pela Meta - FISGA",
   description:
-    "Meta App Review notes for OpenReply's official Instagram private reply workflow.",
+    "Informações sobre o fluxo oficial de respostas privadas no Instagram usado pela FISGA.",
 };
 
 export default function MetaReviewPage() {
   return (
     <LegalShell
-      title="Meta App Review Support"
-      description="OpenReply is designed for Instagram professional accounts that want to send private replies after keyword comments on their own posts or reels."
+      title="Suporte para análise do app pela Meta"
+      description="A FISGA foi criada para contas profissionais do Instagram que desejam enviar respostas privadas após comentários com palavras-chave em publicações próprias ou Reels."
       updatedAt="May 24, 2026"
     >
       <section>
-        <h2 className="text-xl font-bold text-white">User Flow</h2>
+        <h2 className="text-xl font-bold text-white">Fluxo de uso</h2>
         <p className="mt-3">
-          A business owner signs in by email, connects an Instagram professional
-          account through Meta OAuth, creates a keyword campaign for a post or
-          reel, and receives a webhook when someone comments. OpenReply queues
-          the event, deduplicates it, checks rate limits, then sends a private
-          reply using the comment ID.
+          O responsável pela empresa entra com o e-mail, conecta uma conta
+          profissional do Instagram pelo OAuth da Meta e cria uma campanha com
+          palavra-chave para uma publicação ou Reel. Quando alguém comenta, a
+          FISGA recebe o evento por webhook, evita duplicações, verifica os
+          limites de envio e então envia uma resposta privada usando o ID do
+          comentário.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Compliance Position</h2>
+        <h2 className="text-xl font-bold text-white">Conformidade</h2>
         <p className="mt-3">
-          The app uses official Meta APIs, verifies webhook signatures, encrypts
-          tokens, avoids scraping, avoids password collection, and sends no more
-          than one private reply for a matched campaign/comment pair.
+          O app usa as APIs oficiais da Meta, verifica assinaturas de webhook,
+          criptografa tokens, não coleta senhas e não faz scraping. Para cada par
+          de campanha e comentário correspondente, envia no máximo uma resposta
+          privada.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Review Test Notes</h2>
+        <h2 className="text-xl font-bold text-white">Notas para teste</h2>
         <p className="mt-3">
-          Reviewers can use a Meta test business, connect an Instagram
-          professional account, create a keyword such as LINK, comment that
-          keyword on the selected media, and confirm that the private reply is
-          sent and logged once.
+          Para testar, use uma empresa de teste da Meta, conecte uma conta
+          profissional do Instagram, crie uma palavra-chave como LINK e comente
+          essa palavra na mídia selecionada. Em seguida, confirme que a resposta
+          privada foi enviada e registrada uma única vez.
         </p>
       </section>
     </LegalShell>

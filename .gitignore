@@ -19,6 +19,7 @@
 
 # production
 /build
+/.openreply-media/
 
 # misc
 .DS_Store

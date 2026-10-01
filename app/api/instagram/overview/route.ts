@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
+import { getCampaignsForOverviewPost } from "@/lib/overview-campaigns";
+import {
+  hasTrialReelInsights,
+  mergePublishedTrialReels,
+} from "@/lib/instagram-overview-media";
 import {
   getAllUserMedia,
   getMediaInsights,
@@ -58,10 +63,13 @@ export interface OverviewPost {
   timestamp: string;
   views: number | null;
   reach: number | null;
-  likes: number;
-  comments: number;
+  likes: number | null;
+  comments: number | null;
   saved: number | null;
   shares: number | null;
+  isTrialReel: boolean;
+  trialInsightsAvailable: boolean | null;
+  campaigns: ReturnType<typeof getCampaignsForOverviewPost>;
 }
 
 export interface OverviewResponse {
@@ -70,6 +78,7 @@ export interface OverviewResponse {
   requestedCount: "all" | number;
   truncated: boolean;
   insightsAvailable: boolean;
+  insightsPermissionDenied: boolean;
   /** Current follower total, or null if Instagram did not return it. */
   followers: number | null;
   /**
@@ -138,8 +147,42 @@ export async function GET(request: NextRequest) {
       ? MAX_POSTS
       : Math.min(requestedCount as number, MAX_POSTS);
 
-    const media = await getAllUserMedia(accessToken, target);
-    const truncated = media.length >= MAX_POSTS;
+    const [feedMedia, trialPosts] = await Promise.all([
+      getAllUserMedia(accessToken, target),
+      prisma.scheduledPost.findMany({
+        where: {
+          workspaceId,
+          instagramAccountId: account.id,
+          status: "PUBLISHED",
+          trialGraduationStrategy: { not: null },
+          instagramMediaId: { not: null },
+          publishedAt: { not: null },
+        },
+        orderBy: { publishedAt: "desc" },
+        take: target,
+        select: {
+          instagramMediaId: true,
+          caption: true,
+          permalink: true,
+          publishedAt: true,
+        },
+      }),
+    ]);
+    const mediaEntries = mergePublishedTrialReels(
+      feedMedia,
+      trialPosts.flatMap((post) =>
+        post.instagramMediaId && post.publishedAt
+          ? [{
+              instagramMediaId: post.instagramMediaId,
+              caption: post.caption,
+              permalink: post.permalink,
+              publishedAt: post.publishedAt,
+            }]
+          : []
+      ),
+      target
+    );
+    const truncated = feedMedia.length >= MAX_POSTS || trialPosts.length >= MAX_POSTS;
 
     // Likes and comments come free with basic media fields. Views / reach /
     // saved / shares require the insights permission, so fetch them per media
@@ -149,14 +192,14 @@ export async function GET(request: NextRequest) {
     let permissionDenied = false;
 
     const insights = await mapWithConcurrency(
-      media,
+      mediaEntries,
       INSIGHTS_CONCURRENCY,
       async (m) => {
-        const metrics = isVideoLike(m)
+        const metrics = isVideoLike(m.media)
           ? ["views", "reach", "saved", "shares", "total_interactions"]
           : ["reach", "saved", "shares", "total_interactions"];
         try {
-          const data = await getMediaInsights(accessToken, m.id, metrics);
+          const data = await getMediaInsights(accessToken, m.media.id, metrics);
           insightsAvailable = true;
           return data;
         } catch (err) {
@@ -166,10 +209,13 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const posts: OverviewPost[] = media.map((m, i) => {
+    const posts: OverviewPost[] = mediaEntries.map(({ media: m, isTrialReel }, i) => {
       const ins = insights[i];
-      const likes = m.like_count ?? 0;
-      const comments = m.comments_count ?? 0;
+      const likes = m.like_count ?? (isTrialReel ? null : 0);
+      const comments = m.comments_count ?? (isTrialReel ? null : 0);
+      const trialInsightsAvailable = isTrialReel
+        ? hasTrialReelInsights(ins)
+        : null;
       return {
         id: m.id,
         caption: m.caption?.trim().slice(0, 120) ?? null,
@@ -183,19 +229,47 @@ export async function GET(request: NextRequest) {
         comments,
         saved: ins?.saved ?? null,
         shares: ins?.shares ?? null,
+        isTrialReel,
+        trialInsightsAvailable,
+        campaigns: [],
       };
     });
+
+    const campaignRecords = posts.length
+      ? await prisma.automation.findMany({
+          where: {
+            workspaceId,
+            instagramAccountId: account.id,
+            OR: [
+              { postId: { in: posts.map((post) => post.id) } },
+              { matchAnyPost: true },
+            ],
+          },
+          select: {
+            id: true,
+            name: true,
+            postId: true,
+            isActive: true,
+            matchAnyPost: true,
+          },
+          orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
+        })
+      : [];
+
+    for (const post of posts) {
+      post.campaigns = getCampaignsForOverviewPost(post.id, campaignRecords);
+    }
 
     const totals = posts.reduce(
       (acc, p) => {
         acc.posts += 1;
         acc.views += p.views ?? 0;
         acc.reach += p.reach ?? 0;
-        acc.likes += p.likes;
-        acc.comments += p.comments;
+        acc.likes += p.likes ?? 0;
+        acc.comments += p.comments ?? 0;
         acc.saved += p.saved ?? 0;
         acc.shares += p.shares ?? 0;
-        acc.interactions += p.likes + p.comments + (p.saved ?? 0) + (p.shares ?? 0);
+        acc.interactions += (p.likes ?? 0) + (p.comments ?? 0) + (p.saved ?? 0) + (p.shares ?? 0);
         return acc;
       },
       {
@@ -240,6 +314,7 @@ export async function GET(request: NextRequest) {
       requestedCount,
       truncated,
       insightsAvailable: insightsAvailable && !permissionDenied,
+      insightsPermissionDenied: permissionDenied,
       followers,
       followerHistory,
       totals,

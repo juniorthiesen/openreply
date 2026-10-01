@@ -2,52 +2,54 @@ import type { Metadata } from "next";
 import LegalShell from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: "Terms of Service - OpenReply",
+  title: "Termos de uso - FISGA",
   description:
-    "Terms for using OpenReply's Instagram comment-to-DM campaign software.",
+    "Termos para uso das ferramentas de campanhas e conteúdo para Instagram da FISGA.",
 };
 
 export default function TermsPage() {
   return (
     <LegalShell
-      title="Terms of Service"
-      description="These terms define acceptable use for OpenReply's hosted Instagram comment-to-DM campaign service."
+      title="Termos de uso"
+      description="Estes termos definem as condições de uso das ferramentas de campanhas e conteúdo para Instagram da FISGA."
       updatedAt="May 24, 2026"
     >
       <section>
-        <h2 className="text-xl font-bold text-white">Authorized Use</h2>
+        <h2 className="text-xl font-bold text-white">Uso autorizado</h2>
         <p className="mt-3">
-          You may use OpenReply only with Instagram professional accounts you
-          own or are authorized to manage. You are responsible for the campaigns,
-          keywords, links, and messages you configure.
+          Você pode usar a FISGA apenas com contas profissionais do Instagram
+          que possui ou está autorizado a gerenciar. Você é responsável pelas
+          campanhas, palavras-chave, links e mensagens que configurar.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Platform Compliance</h2>
+        <h2 className="text-xl font-bold text-white">Regras da plataforma</h2>
         <p className="mt-3">
-          You agree to follow Meta Platform Terms, Instagram policies, applicable
-          messaging rules, privacy laws, advertising rules, and anti-spam laws.
-          OpenReply may rate-limit, pause, or disable campaigns that create
-          compliance, abuse, security, or deliverability risk.
+          Você concorda em seguir os termos da plataforma Meta, as políticas do
+          Instagram, as regras de mensagens aplicáveis e as leis de privacidade,
+          publicidade e combate a spam. A FISGA pode limitar, pausar ou desativar
+          campanhas que criem riscos de conformidade, abuso, segurança ou
+          entrega.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Availability</h2>
+        <h2 className="text-xl font-bold text-white">Disponibilidade</h2>
         <p className="mt-3">
-          OpenReply depends on third-party platforms including Meta, email,
-          hosting, database, and queue providers. We work to operate the
-          service reliably, but uninterrupted availability is not guaranteed.
+          A FISGA depende de serviços de terceiros, incluindo Meta, provedores de
+          e-mail, hospedagem, banco de dados e filas. Trabalhamos para manter o
+          serviço confiável, mas não garantimos disponibilidade ininterrupta.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-bold text-white">Open-Source Core</h2>
+        <h2 className="text-xl font-bold text-white">Serviços e ferramentas</h2>
         <p className="mt-3">
-          The public repository is MIT licensed. Hosted SaaS infrastructure,
-          managed support, agency workflows, analytics, reports, and other paid
-          service features may be provided separately from the open-source core.
+          O repositório público é licenciado sob MIT. A infraestrutura hospedada,
+          o suporte gerenciado, os fluxos para agências, as análises, os
+          relatórios e outros recursos pagos podem ser fornecidos separadamente
+          do núcleo de código aberto.
         </p>
       </section>
     </LegalShell>

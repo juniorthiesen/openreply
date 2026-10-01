@@ -6,14 +6,14 @@ import type { MetadataRoute } from "next";
 // a phone practical.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "OpenReply",
-    short_name: "OpenReply",
-    description: "Instagram comment-to-DM automation",
+    name: "FISGA",
+    short_name: "FISGA",
+    description: "Campanhas, publicações e métricas para Instagram",
     start_url: "/overview",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#18181b",
-    theme_color: "#18181b",
+    background_color: "#F6F4EF",
+    theme_color: "#F6F4EF",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },

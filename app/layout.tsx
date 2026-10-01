@@ -1,22 +1,44 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
+const geist = localFont({
+  src: "../public/fonts/geist-latin.woff2",
+  variable: "--font-geist",
+  display: "swap",
+  weight: "400 700",
+});
+
+const bricolage = localFont({
+  src: "../public/fonts/bricolage-grotesque-latin.woff2",
+  variable: "--font-bricolage",
+  display: "swap",
+  weight: "600 700",
+});
+
+const jetBrains = localFont({
+  src: "../public/fonts/jetbrains-mono-latin.woff2",
+  variable: "--font-jetbrains",
+  display: "swap",
+  weight: "500",
+});
+
 export const metadata: Metadata = {
-  title: "OpenReply - Open source Instagram comment-to-DM automation",
+  title: "FISGA — campanhas e conteúdo para Instagram",
   description:
-    "A free, self-hosted ManyChat alternative. Send an Instagram DM automatically when someone comments a keyword on your post or reel, using the official Meta API.",
+    "Automatize respostas a comentários, publique e agende conteúdo e acompanhe métricas do Instagram em um só lugar.",
   keywords: [
-    "instagram automation",
-    "comment to DM",
-    "instagram private replies",
-    "social commerce",
-    "manychat alternative",
+    "automação instagram",
+    "comentário para direct",
+    "resposta privada instagram",
+    "agendamento instagram",
+    "métricas instagram",
   ],
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "OpenReply",
+    title: "FISGA",
     statusBarStyle: "black-translucent",
   },
   icons: {
@@ -29,7 +51,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#18181b",
+  themeColor: "#F6F4EF",
   width: "device-width",
   initialScale: 1,
   // Installed on iOS the app owns the full screen, notch included; the safe
@@ -43,7 +65,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full dark">
+    <html
+      lang="pt-BR"
+      className={`h-full ${geist.variable} ${bricolage.variable} ${jetBrains.variable}`}
+    >
       <body
         className="min-h-full bg-background text-foreground font-sans antialiased"
         // Clears the home indicator when installed; 0 everywhere else.
