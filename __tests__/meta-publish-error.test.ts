@@ -12,6 +12,17 @@ describe("classifyInstagramPublishError", () => {
     expect(result.message).toContain("trial parameter");
   });
 
+  it("does not revoke publishing when the account cannot post trial reels", () => {
+    const result = classifyInstagramPublishError(
+      10,
+      "Application does not have permission for this action",
+      2207081
+    );
+
+    expect(result.permissionRevoked).toBe(false);
+    expect(result.message).toContain("Reels de teste");
+  });
+
   it.each([10, 200])("marks an explicit permission error (code %i)", (code) => {
     const result = classifyInstagramPublishError(code, "Permission denied");
 

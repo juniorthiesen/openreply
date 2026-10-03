@@ -217,7 +217,7 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
       });
     } catch (error) {
       if (error instanceof PermissionError) {
-        const failure = classifyInstagramPublishError(error.code, error.message);
+        const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
         if (failure.permissionRevoked) {
           await prisma.instagramAccount.updateMany({
             where: { id: post.instagramAccountId },
@@ -289,7 +289,7 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
     instagramMediaId = published.id;
   } catch (error) {
     if (error instanceof PermissionError) {
-      const failure = classifyInstagramPublishError(error.code, error.message);
+      const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
       if (failure.permissionRevoked) {
         await prisma.instagramAccount.updateMany({
           where: { id: post.instagramAccountId },

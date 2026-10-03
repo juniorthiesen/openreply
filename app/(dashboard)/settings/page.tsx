@@ -238,7 +238,7 @@ export default function SettingsPage() {
                   </p>
                   {!account.publishingPermissionGranted && (
                     <p className="mt-2 text-xs text-warning">
-                      O app marcou a permissão de publicação como recusada. Reconecte o Instagram para autorizá-la novamente.
+                      A permissão de publicação ainda não foi autorizada nesta conta, ou a Meta a recusou. Reconecte o Instagram para autorizá-la.
                     </p>
                   )}
                 </div>
