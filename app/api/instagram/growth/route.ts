@@ -163,7 +163,7 @@ export async function GET(request: NextRequest) {
 
     const followerCountPromise = ensureFollowerHistory(
       { id: account.id, instagramId: account.instagramId },
-      accessToken
+      { provider: "META", accessToken }
     ).catch((error) => {
       console.warn("[Instagram Growth] Histórico de seguidores indisponível:", error instanceof Error ? error.message : error);
       return null;

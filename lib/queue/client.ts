@@ -23,6 +23,7 @@ export function getRedisConnection(): Redis {
 export type CommentSource = "WEBHOOK" | "POLLING";
 
 export interface ProcessCommentJob {
+  accountConnectionId?: string;
   instagramAccountId: string;
   commentId: string;
   commentText: string;
@@ -40,17 +41,26 @@ export interface ProcessCommentJob {
 
 // Delivered when a user taps an opening DM's button — carries the reveal target.
 export interface ProcessPostbackJob {
+  accountConnectionId?: string;
   instagramAccountId: string;
   userId: string;
   payload: string;
   mid?: string;
   fallback?: boolean;
+  // Set on the delayed second pass of a follow-gate check. Instagram does not
+  // report a brand-new follow immediately, so the first `false` is re-checked
+  // later instead of rejecting the tap outright.
+  followRecheck?: boolean;
+  // How many delayed re-checks have run, counting this one. Absent on jobs
+  // queued before re-checks were counted, where `followRecheck` meant one.
+  followRecheckAttempt?: number;
 }
 
 // Scheduled after the link is delivered, to send the appreciation follow-up.
 // Enqueued with a delay (followUpDelayMinutes) so it can fire later, not just
 // immediately.
 export interface ProcessFollowUpJob {
+  accountConnectionId?: string;
   instagramAccountId: string;
   userId: string;
   automationId: string;
@@ -60,6 +70,7 @@ export interface ProcessFollowUpJob {
 // An inbound DM from a user. Campaigns with `dmTriggerEnabled` whose keywords
 // match the text reply to the sender.
 export interface ProcessMessageJob {
+  accountConnectionId?: string;
   instagramAccountId: string;
   messageId: string;
   messageText: string;

@@ -298,7 +298,7 @@ export async function GET(request: NextRequest) {
     try {
       followers = await ensureFollowerHistory(
         { id: account.id, instagramId: account.instagramId },
-        accessToken
+        { provider: "META", accessToken }
       );
       followerHistory = await getFollowerHistory(account.id);
     } catch (err) {

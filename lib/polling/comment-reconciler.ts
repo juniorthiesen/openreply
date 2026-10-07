@@ -25,6 +25,8 @@
  * filter on the account to widen results.
  */
 
+import { MAX_COMMENT_SEND_ATTEMPTS } from "@/lib/queue/comment-delivery";
+import { hasLegacyUnconfirmedDelivery } from "@/lib/instagram/delivery-errors";
 import { prisma } from "@/lib/db/client";
 import { getDMQueue } from "@/lib/queue/client";
 import {
@@ -32,8 +34,11 @@ import {
   getUserMedia,
   MetaApiError,
   type InstagramComment,
-} from "@/lib/meta/client";
-import { decryptToken } from "@/lib/meta/oauth";
+} from "@/lib/instagram/provider";
+import {
+  createInstagramContext,
+  type InstagramContext,
+} from "@/lib/instagram/provider";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 
 // Only consider comments from the last few days — older ones are outside
@@ -55,7 +60,8 @@ interface SweepStat {
 }
 
 function errMessage(error: unknown): string {
-  if (error instanceof MetaApiError) return `Meta ${error.code}: ${error.message}`;
+  if (error instanceof MetaApiError)
+    return `Meta ${error.code}: ${error.message}`;
   if (error instanceof Error) return error.message;
   return "Unknown error";
 }
@@ -80,16 +86,23 @@ export async function reconcileComments(): Promise<void> {
           instagramId: true,
           username: true,
           accessToken: true,
+          provider: true,
+          workspaceId: true,
+          zernioAccountId: true,
         },
       },
     },
   });
 
   const sinceMs = Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000;
-  const tokenCache = new Map<string, string | null>();
+  const tokenCache = new Map<string, InstagramContext | null>();
 
   for (const automation of automations) {
-    const stat = await sweepCampaign(automation, sinceMs, tokenCache).catch(
+    const stat = await sweepCampaign({
+      automation: automation,
+      sinceMs: sinceMs,
+      tokenCache: tokenCache,
+    }).catch(
       (error): SweepStat => ({
         campaign: automation.name,
         keywords: automation.keywords.join(","),
@@ -103,7 +116,11 @@ export async function reconcileComments(): Promise<void> {
   }
 }
 
-async function sweepCampaign(
+async function sweepCampaign({
+  automation,
+  sinceMs,
+  tokenCache,
+}: {
   automation: {
     id: string;
     name: string;
@@ -118,11 +135,14 @@ async function sweepCampaign(
       instagramId: string;
       username: string;
       accessToken: string;
+      provider: "META" | "ZERNIO";
+      workspaceId: string;
+      zernioAccountId: string | null;
     };
-  },
-  sinceMs: number,
-  tokenCache: Map<string, string | null>
-): Promise<SweepStat> {
+  };
+  sinceMs: number;
+  tokenCache: Map<string, InstagramContext | null>;
+}): Promise<SweepStat> {
   const account = automation.instagramAccount;
   const stat: SweepStat = {
     campaign: automation.name,
@@ -139,7 +159,7 @@ async function sweepCampaign(
   let accessToken = tokenCache.get(account.id);
   if (accessToken === undefined) {
     try {
-      accessToken = decryptToken(account.accessToken);
+      accessToken = await createInstagramContext(account);
     } catch {
       accessToken = null;
     }
@@ -158,7 +178,10 @@ async function sweepCampaign(
     mediaIds.push(...(await adMediaFor(automation.postId)));
   } else if (automation.matchAnyPost) {
     try {
-      const media = await getUserMedia(accessToken, RECENT_MEDIA_LIMIT);
+      const media = await getUserMedia({
+        context: accessToken,
+        limit: RECENT_MEDIA_LIMIT,
+      });
       mediaIds.push(...media.map((m) => m.id));
     } catch (error) {
       stat.errors.push(`Media list: ${errMessage(error)}`);
@@ -171,7 +194,11 @@ async function sweepCampaign(
   for (const mediaId of mediaIds) {
     let comments: InstagramComment[];
     try {
-      comments = await getRecentMediaComments(accessToken, mediaId, sinceMs);
+      comments = await getRecentMediaComments({
+        context: accessToken,
+        mediaId: mediaId,
+        sinceMs: sinceMs,
+      });
     } catch (error) {
       stat.errors.push(`Comments ${mediaId}: ${errMessage(error)}`);
       continue;
@@ -185,8 +212,11 @@ async function sweepCampaign(
 
       const matched = automation.matchAnyWord
         ? true
-        : matchKeywords(c.text ?? "", automation.keywords, automation.wholeWordMatch)
-            .matched;
+        : matchKeywords(
+            c.text ?? "",
+            automation.keywords,
+            automation.wholeWordMatch
+          ).matched;
       if (!matched) return false;
       stat.matched += 1;
 
@@ -207,17 +237,25 @@ async function sweepCampaign(
     // enough — the reply still has to land); otherwise a SENT DM is enough. This
     // is what lets a comment whose DM sent but whose public reply failed come
     // back and retry the reply.
-    const handled = await prisma.dmLog.findMany({
+    const logs = await prisma.dmLog.findMany({
       where: {
         automationId: automation.id,
         commentId: { in: needsAction.map((c) => c.id) },
-        ...(automation.publicReplyEnabled
-          ? { publicReplySentAt: { not: null } }
-          : { status: "SENT" }),
       },
-      select: { commentId: true },
+      select: {
+        commentId: true, status: true, attempts: true, errorMessage: true,
+        dmDeliveryUnconfirmed: true, publicReplySentAt: true,
+        publicReplyDeliveryUnconfirmed: true,
+      },
     });
-    const handledSet = new Set(handled.map((h) => h.commentId));
+    const handledSet = new Set(logs.filter((log) => {
+      const dmStopped = log.status === "SENT" || log.status === "SKIPPED_PLAN_LIMIT" ||
+        log.dmDeliveryUnconfirmed || log.attempts >= MAX_COMMENT_SEND_ATTEMPTS ||
+        (log.status === "FAILED" && hasLegacyUnconfirmedDelivery(log.errorMessage));
+      const replyStopped = !automation.publicReplyEnabled ||
+        log.publicReplySentAt || log.publicReplyDeliveryUnconfirmed;
+      return dmStopped && replyStopped;
+    }).map((log) => log.commentId));
 
     // Oldest first, so whoever commented earliest gets answered first, capped.
     const fresh = needsAction
@@ -229,10 +267,11 @@ async function sweepCampaign(
       // No deterministic jobId here: a retained completed/failed job from an
       // earlier sweep would otherwise be treated as a duplicate and silently
       // drop this add, so the comment would never be retried. Dedup is handled
-      // above (owner-reply + DmLog guards) and the worker is idempotent
-      // (publicReplySentAt / SENT), so re-processing a comment is safe.
+      // above and by the worker's atomic, durable per-leg claims. Send attempts
+      // are counted in DmLog across jobs, so a sweep cannot reset the budget.
       await queue.add("process-comment", {
         instagramAccountId: account.instagramId,
+        accountConnectionId: account.id,
         commentId: c.id,
         commentText: c.text ?? "",
         commenterId: c.from!.id,

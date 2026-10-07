@@ -83,28 +83,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await prisma.instagramAccount.upsert({
-      where: { instagramId },
-      create: {
-        workspaceId: state.workspaceId,
-        instagramId,
-        username: userInfo.username,
-        name: userInfo.name,
-        accessToken: encryptedToken,
-        tokenExpiresAt,
-        webhookSubscribed,
-        publishingPermissionGranted: true,
-      },
-      update: {
-        workspaceId: state.workspaceId,
-        username: userInfo.username,
-        name: userInfo.name,
-        accessToken: encryptedToken,
-        tokenExpiresAt,
-        webhookSubscribed,
-        publishingPermissionGranted: true,
-      },
-    });
+    const data = {
+      username: userInfo.username,
+      name: userInfo.name,
+      accessToken: encryptedToken,
+      tokenExpiresAt,
+      webhookSubscribed,
+      // Instagram Login asks for content publishing, so a fresh connect grants it.
+      publishingPermissionGranted: true,
+    };
+    const existing = await prisma.instagramAccount.findUnique({ where: { instagramId } });
+    if (existing) {
+      const updated = await prisma.instagramAccount.updateMany({
+        where: { id: existing.id, workspaceId: state.workspaceId, provider: 'META' }, data,
+      });
+      if (!updated.count) return NextResponse.redirect(`${baseUrl}/settings?instagram=already_connected`);
+    } else {
+      await prisma.instagramAccount.create({ data: { ...data, workspaceId: state.workspaceId, instagramId, provider: 'META' } });
+    }
 
     return NextResponse.redirect(`${baseUrl}/dashboard?connected=true`);
   } catch (err) {

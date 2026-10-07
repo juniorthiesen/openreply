@@ -75,6 +75,7 @@ model Workspace {
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
+  zernioConnection  ZernioConnection?
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
@@ -135,6 +136,8 @@ model InstagramAccount {
   instagramId       String   @unique
   username          String
   name              String?
+  provider          InstagramProvider @default(META)
+  zernioAccountId   String?
   accessToken       String
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean  @default(false)
@@ -430,6 +433,8 @@ model DmLog {
   // The public comment reply is delivered independently of the DM, so its
   // outcome is tracked separately. publicReplySentAt makes it idempotent across
   // retries; a DM failure never blocks or re-posts the public reply.
+  dmDeliveryUnconfirmed Boolean @default(false)
+  publicReplyDeliveryUnconfirmed Boolean @default(false)
   publicReplySentAt DateTime?
   publicReplyError  String?
 
@@ -467,6 +472,11 @@ model TrackedLink {
   slug           String   @unique
   label          String?
   destinationUrl String
+  // Which DM button this link is, starting at 0. Read links with
+  // TRACKED_LINK_ORDER (lib/tracking/link-order.ts), never by createdAt alone:
+  // links saved in one request share a createdAt, and Postgres returns tied
+  // rows in no fixed order.
+  position       Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -485,6 +495,9 @@ model LinkClick {
   instagramAccountId String
   trackedLinkId      String
   ipHash             String?
+  // Token from the link's `?r=` (hashRecipientId), set on links sent in a DM.
+  // Clicks are counted once per recipient, falling back to ipHash without it.
+  recipientHash      String?
   userAgent          String?
   referrer           String?
   createdAt          DateTime @default(now())
@@ -623,4 +636,27 @@ enum OperationalEventLevel {
   INFO
   WARNING
   ERROR
+}
+
+
+enum InstagramProvider {
+  META
+  ZERNIO
+}
+
+model ZernioConnection {
+  workspaceId    String @id
+  apiKey         String
+  profileId      String?
+  webhookId      String?
+  webhookSecret  String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// Claims persist independently of BullMQ retention so old taps never resend.
+model PostbackDelivery {
+  id String @id
+  createdAt DateTime @default(now())
 }

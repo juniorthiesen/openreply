@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
 
       return {
         id: conversation.id,
+        detailsUnavailable: conversation.detailsUnavailable,
         contact: {
           id: contact?.id ?? "",
           username: contact?.username ?? null,
