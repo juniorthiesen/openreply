@@ -13,12 +13,11 @@ import {
   getInstagramMediaPermalink,
   getUserMedia,
   MetaApiError,
-  PermissionError,
   publishInstagramMediaContainer,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { getMediaPublicUrl } from "@/lib/media-assets";
-import { classifyInstagramPublishError } from "@/lib/meta/publish-error";
+import { classifyInstagramPublishError, describeContainerFailure } from "@/lib/meta/publish-error";
 import { getRedisConnection } from "@/lib/queue/client";
 import {
   PublishScheduledPostJob,
@@ -28,6 +27,26 @@ import {
 
 const CONTAINER_POLL_INTERVAL_MS = 10_000;
 const MAX_CONTAINER_POLLS = 30;
+
+function isRateLimitCode(code: number) {
+  return code === 4 || code === 17 || code === 368;
+}
+
+/**
+ * Turn a Meta refusal into the job outcome: a translated message, a retry
+ * when the same file can still succeed, and the publishing flag cleared only
+ * when Meta really withdrew the permission.
+ */
+async function toPublishFailure(error: MetaApiError, instagramAccountId: string): Promise<Error> {
+  const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
+  if (failure.permissionRevoked) {
+    await prisma.instagramAccount.updateMany({
+      where: { id: instagramAccountId },
+      data: { publishingPermissionGranted: false },
+    });
+  }
+  return failure.retryable ? new Error(failure.message) : new UnrecoverableError(failure.message);
+}
 
 function pause(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -182,7 +201,7 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
               data: { containerId: null },
             });
             throw new UnrecoverableError(
-              statuses[failedIndex].status || `A Meta não conseguiu processar um item do carrossel (${statuses[failedIndex].status_code}).`
+              describeContainerFailure(statuses[failedIndex].status, statuses[failedIndex].status_code)
             );
           }
           if (statuses.every((status) => status.status_code === "FINISHED")) break;
@@ -216,18 +235,8 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
         data: { containerId, publishStartedAt: null },
       });
     } catch (error) {
-      if (error instanceof PermissionError) {
-        const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
-        if (failure.permissionRevoked) {
-          await prisma.instagramAccount.updateMany({
-            where: { id: post.instagramAccountId },
-            data: { publishingPermissionGranted: false },
-          });
-        }
-        throw new UnrecoverableError(failure.message);
-      }
-      if (error instanceof MetaApiError && !(error.code === 4 || error.code === 17 || error.code === 368)) {
-        throw new UnrecoverableError(error.message);
+      if (error instanceof MetaApiError && !isRateLimitCode(error.code)) {
+        throw await toPublishFailure(error, post.instagramAccountId);
       }
       throw error;
     }
@@ -258,7 +267,7 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
         data: { containerId: null, publishStartedAt: null },
       });
       throw new UnrecoverableError(
-        containerStatus.status || `A Meta não conseguiu processar o arquivo (${containerStatus.status_code}).`
+        describeContainerFailure(containerStatus.status, containerStatus.status_code)
       );
     }
     await pause(CONTAINER_POLL_INTERVAL_MS);
@@ -288,20 +297,9 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
     );
     instagramMediaId = published.id;
   } catch (error) {
-    if (error instanceof PermissionError) {
-      const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
-      if (failure.permissionRevoked) {
-        await prisma.instagramAccount.updateMany({
-          where: { id: post.instagramAccountId },
-          data: { publishingPermissionGranted: false },
-        });
-      }
-      throw new UnrecoverableError(failure.message);
-    }
-
     // A timeout can happen after Meta has accepted the publish request. Reuse
     // the same container on retry and check its state before another publish.
-    if (error instanceof MetaApiError && !(error.code === 4 || error.code === 17 || error.code === 368)) {
+    if (error instanceof MetaApiError && !isRateLimitCode(error.code)) {
       const status = await getInstagramMediaContainerStatus(accessToken, containerId).catch(() => null);
       if (status?.status_code === "PUBLISHED") {
         const mediaId = await recoverPublishedMediaId(
@@ -318,7 +316,7 @@ async function processScheduledPost(job: Job<PublishScheduledPostJob>, token?: s
         await finishPublishedPost(post, mediaId, permalink);
         return;
       }
-      throw new UnrecoverableError(error.message);
+      throw await toPublishFailure(error, post.instagramAccountId);
     }
     throw error;
   }

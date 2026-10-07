@@ -7,6 +7,8 @@ import { getLongLivedToken, getUserInfo, subscribeInstagramAccountToWebhooks } f
 import {
   encryptToken,
   exchangeCodeForToken,
+  INSTAGRAM_PUBLISH_SCOPE,
+  REQUIRED_INSTAGRAM_SCOPES,
   verifyOAuthState,
 } from "@/lib/meta/oauth";
 import { canManageWorkspace } from "@/lib/workspace-access";
@@ -43,10 +45,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const redirectUri = `${baseUrl}/api/instagram/callback`;
-    const { accessToken: shortLivedToken } = await exchangeCodeForToken(
-      code,
-      redirectUri
-    );
+    const { accessToken: shortLivedToken, grantedScopes } =
+      await exchangeCodeForToken(code, redirectUri);
+
+    // The consent screen lets the user untick permissions. Refuse a connect
+    // that can't run campaigns, rather than one that fails on the first DM.
+    // When Meta doesn't report scopes at all, keep the old trusting behavior.
+    const missingScopes = grantedScopes
+      ? REQUIRED_INSTAGRAM_SCOPES.filter((scope) => !grantedScopes.includes(scope))
+      : [];
+    if (missingScopes.length > 0) {
+      return NextResponse.redirect(
+        `${baseUrl}/settings?instagram=missing_permissions&missing=${encodeURIComponent(missingScopes.join(","))}`
+      );
+    }
+    const publishingPermissionGranted = grantedScopes
+      ? grantedScopes.includes(INSTAGRAM_PUBLISH_SCOPE)
+      : true;
     const { accessToken: longLivedToken, expiresIn } =
       await getLongLivedToken(shortLivedToken);
     const userInfo = await getUserInfo(longLivedToken);
@@ -89,8 +104,7 @@ export async function GET(request: NextRequest) {
       accessToken: encryptedToken,
       tokenExpiresAt,
       webhookSubscribed,
-      // Instagram Login asks for content publishing, so a fresh connect grants it.
-      publishingPermissionGranted: true,
+      publishingPermissionGranted,
     };
     const existing = await prisma.instagramAccount.findUnique({ where: { instagramId } });
     if (existing) {
@@ -102,6 +116,11 @@ export async function GET(request: NextRequest) {
       await prisma.instagramAccount.create({ data: { ...data, workspaceId: state.workspaceId, instagramId, provider: 'META' } });
     }
 
+    // Connected, but the user unticked publishing: say so now instead of at
+    // the first scheduled post.
+    if (!publishingPermissionGranted) {
+      return NextResponse.redirect(`${baseUrl}/settings?instagram=no_publish`);
+    }
     return NextResponse.redirect(`${baseUrl}/dashboard?connected=true`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

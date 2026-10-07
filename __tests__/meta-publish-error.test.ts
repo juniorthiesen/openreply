@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { classifyInstagramPublishError } from "@/lib/meta/publish-error";
+import {
+  classifyInstagramPublishError,
+  describeContainerFailure,
+} from "@/lib/meta/publish-error";
 
 describe("classifyInstagramPublishError", () => {
   it("does not mark the account permission as revoked for code 100", () => {
@@ -29,5 +32,48 @@ describe("classifyInstagramPublishError", () => {
     expect(result.permissionRevoked).toBe(true);
     expect(result.message).toContain("Permission denied");
     expect(result.message).toContain("Reconecte o Instagram");
+  });
+
+  it("translates a known publishing subcode and keeps the account's permission", () => {
+    const result = classifyInstagramPublishError(
+      100,
+      "Media upload has failed with error code 2207026",
+      2207026
+    );
+
+    expect(result.known).toBe(true);
+    expect(result.permissionRevoked).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain("Formato de vídeo não suportado");
+  });
+
+  it("finds the subcode inside Meta's text when the field is missing", () => {
+    const result = classifyInstagramPublishError(
+      -1,
+      "Media upload has failed with error code 2207003"
+    );
+
+    expect(result.retryable).toBe(true);
+    expect(result.message).toContain("demorou demais");
+  });
+
+  it("explains the trial reels limit", () => {
+    const result = classifyInstagramPublishError(10, "limit", 2207078);
+
+    expect(result.permissionRevoked).toBe(false);
+    expect(result.message).toContain("limite de Reels de teste");
+  });
+});
+
+describe("describeContainerFailure", () => {
+  it("translates a container status that carries a subcode", () => {
+    expect(
+      describeContainerFailure("Error: Media upload has failed with error code 2207009", "ERROR")
+    ).toContain("Proporção não suportada");
+  });
+
+  it("falls back to Meta's status, then to a generic message", () => {
+    expect(describeContainerFailure("Something odd", "ERROR")).toBe("Something odd");
+    expect(describeContainerFailure(undefined, "EXPIRED")).toContain("EXPIRED");
   });
 });

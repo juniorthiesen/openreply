@@ -123,10 +123,36 @@ export function getAuthorizationUrl(redirectUri: string, state: string): string 
   return `${INSTAGRAM_OAUTH_URL}?${params.toString()}`;
 }
 
+export const INSTAGRAM_PUBLISH_SCOPE = "instagram_business_content_publish";
+
+/** Without these the app cannot answer comments or DMs, so a connect missing
+ * any of them is refused instead of looking connected and failing later. */
+export const REQUIRED_INSTAGRAM_SCOPES = [
+  "instagram_business_basic",
+  "instagram_business_manage_messages",
+  "instagram_business_manage_comments",
+] as const;
+
+/**
+ * The token exchange reports the scopes the user actually granted — the
+ * consent screen lets them untick some. Meta has returned both a
+ * comma-separated string and an array here; null means it sent neither.
+ */
+export function parseGrantedScopes(value: unknown): string[] | null {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string") {
+    return decodeURIComponent(value)
+      .split(/[,\s]+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+  }
+  return null;
+}
+
 export async function exchangeCodeForToken(
   code: string,
   redirectUri: string
-): Promise<{ accessToken: string; userId: string }> {
+): Promise<{ accessToken: string; userId: string; grantedScopes: string[] | null }> {
   // The Instagram Login token endpoint expects multipart form data. Sending
   // urlencoded data is accepted by the old Basic Display flow but is rejected
   // by the Instagram API with Instagram Login as an unsupported GET request.
@@ -150,10 +176,13 @@ export async function exchangeCodeForToken(
     );
   }
 
-  const data = await response.json();
+  // Documented as `{ data: [{ ... }] }`, observed flat; accept either.
+  const json = await response.json();
+  const data = Array.isArray(json?.data) ? json.data[0] ?? {} : json;
   return {
     accessToken: data.access_token,
     userId: String(data.user_id),
+    grantedScopes: parseGrantedScopes(data.permissions),
   };
 }
 

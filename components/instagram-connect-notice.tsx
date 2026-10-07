@@ -10,6 +10,15 @@ const TONE_CLASSES: Record<Tone, string> = {
   success: "border-success/20 bg-success/10 text-success",
 };
 
+// Names as the Instagram consent screen shows them, so the user can find the
+// toggle they switched off.
+const SCOPE_LABELS: Record<string, string> = {
+  instagram_business_basic: "Acessar perfil e publicações",
+  instagram_business_manage_messages: "Gerenciar e acessar mensagens",
+  instagram_business_manage_comments: "Gerenciar e acessar comentários",
+  instagram_business_content_publish: "Publicar conteúdo",
+};
+
 const MESSAGES: Record<string, { tone: Tone; title: string; detail: string }> = {
   denied: {
     tone: "warning",
@@ -28,6 +37,12 @@ const MESSAGES: Record<string, { tone: Tone; title: string; detail: string }> = 
     title: "Sem permissão",
     detail:
       "Somente proprietários e administradores do espaço de trabalho podem conectar uma conta do Instagram.",
+  },
+  no_publish: {
+    tone: "warning",
+    title: "Conectado sem permissão de publicar",
+    detail:
+      "A conta foi conectada e as automações funcionam, mas a permissão \"Publicar conteúdo\" ficou desmarcada. Para agendar posts, clique em Reconectar Instagram e deixe essa opção marcada.",
   },
   already_connected: {
     tone: "warning",
@@ -69,9 +84,31 @@ export function InstagramConnectNotice() {
         <p className="mt-2">
           Consulte <span className="font-mono text-xs">docs/setup.md</span> para
           saber como obter cada valor. Observação:{" "}
-          <span className="font-mono text-xs">ENCRYPTION_KEY</span> must be a
-          deve ser uma string hexadecimal de 64 caracteres.
+          <span className="font-mono text-xs">ENCRYPTION_KEY</span> deve ser uma string hexadecimal de 64 caracteres.
         </p>
+      </Notice>
+    );
+  }
+
+  if (status === "missing_permissions") {
+    const missing = (searchParams.get("missing") ?? "")
+      .split(",")
+      .filter(Boolean);
+
+    return (
+      <Notice tone="error" title="Faltaram permissões no Instagram">
+        <p>
+          A conta não foi conectada porque estas permissões ficaram desmarcadas
+          na tela do Instagram. Clique em Conectar Instagram de novo e deixe
+          todas marcadas:
+        </p>
+        {missing.length > 0 && (
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {missing.map((scope) => (
+              <li key={scope}>{SCOPE_LABELS[scope] ?? scope}</li>
+            ))}
+          </ul>
+        )}
       </Notice>
     );
   }

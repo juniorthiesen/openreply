@@ -4,6 +4,7 @@ import {
   createOAuthState,
   decryptToken,
   encryptToken,
+  parseGrantedScopes,
   verifyOAuthState,
 } from "../lib/meta/oauth";
 
@@ -83,5 +84,25 @@ describe("OAuth state and token encryption", () => {
         signedState({ workspaceId: 123, ts: Date.now() })
       )
     ).toBeNull();
+  });
+});
+
+describe("parseGrantedScopes", () => {
+  it("reads a comma-separated string, encoded or not", () => {
+    expect(
+      parseGrantedScopes("instagram_business_basic,instagram_business_content_publish")
+    ).toEqual(["instagram_business_basic", "instagram_business_content_publish"]);
+    expect(parseGrantedScopes("instagram_business_basic%2Cinstagram_business_manage_messages"))
+      .toEqual(["instagram_business_basic", "instagram_business_manage_messages"]);
+  });
+
+  it("reads an array", () => {
+    expect(parseGrantedScopes(["instagram_business_basic"])).toEqual([
+      "instagram_business_basic",
+    ]);
+  });
+
+  it("returns null when Meta reports no scopes", () => {
+    expect(parseGrantedScopes(undefined)).toBeNull();
   });
 });

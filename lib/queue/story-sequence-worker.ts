@@ -8,6 +8,7 @@ import {
   PermissionError,
   publishFacebookInstagramStoryContainer,
 } from "@/lib/meta/client";
+import { classifyInstagramPublishError, describeContainerFailure } from "@/lib/meta/publish-error";
 import { decryptToken } from "@/lib/meta/oauth";
 import { getMediaPublicUrl } from "@/lib/media-assets";
 import { resolveStoryPublishingPage } from "@/lib/instagram-stories/page-link";
@@ -30,6 +31,12 @@ function errorMessage(error: unknown): string {
 }
 
 function normalizeStoryError(error: unknown): Error {
+  if (error instanceof MetaApiError) {
+    const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
+    if (failure.known) {
+      return failure.retryable ? new Error(failure.message) : new UnrecoverableError(failure.message);
+    }
+  }
   if (error instanceof PermissionError) {
     if (/business.{0,40}stories|stories.{0,40}business|only.{0,30}business|business account/i.test(error.message)) {
       return new UnrecoverableError(
@@ -171,7 +178,7 @@ async function processStorySequence(
             data: { containerId: null, status: "PENDING" },
           });
           throw new UnrecoverableError(
-            containerStatus.status || `A Meta não conseguiu processar o Story (${containerStatus.status_code}).`
+            describeContainerFailure(containerStatus.status, containerStatus.status_code)
           );
         }
 
