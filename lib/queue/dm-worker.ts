@@ -25,6 +25,7 @@ import {
   RateLimitError,
   TokenExpiredError,
   getUserFollowStatus,
+  getUserProfile,
   sendCommentReply,
   sendDirectMessage,
   sendDirectMessageWithButton,
@@ -1387,13 +1388,17 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       continue;
     }
 
-    // Reuse a name captured on an earlier interaction so {username} still
-    // renders — the messages webhook carries only the sender's IGSID.
+    // The messages webhook carries only the sender's IGSID. Reuse a name
+    // captured on an earlier interaction, else ask Meta, so {username}
+    // renders and the logs show the person instead of a number.
     const priorLog = await prisma.dmLog.findFirst({
-      where: { automationId: automation.id, commenterId: senderId },
+      where: { commenterId: senderId, commenterName: { not: null } },
       select: { commenterName: true },
     });
-    const commenterName = priorLog?.commenterName ?? null;
+    const commenterName =
+      priorLog?.commenterName ??
+      (await getUserProfile({ context: accessToken, recipientId: senderId }))?.username ??
+      null;
 
     // Follow gate: anyone not confirmed as a follower gets the prompt instead of
     // the link, with the same `followcheck:` button that re-verifies on tap.

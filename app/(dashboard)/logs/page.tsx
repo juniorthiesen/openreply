@@ -177,7 +177,7 @@ export default function LogsPage() {
                   <tr key={log.id} className="hover:bg-surface-hover/50 transition-colors">
                     <td className="px-4 py-4 sm:px-6">
                       <span className="font-medium text-foreground">
-                        @{log.commenterName ?? log.commenterId.slice(0, 8)}
+                        {log.commenterName ? `@${log.commenterName}` : "Usuário do Instagram"}
                       </span>
                     </td>
                     <td className="px-4 py-4 max-w-[200px] sm:px-6">

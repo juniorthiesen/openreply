@@ -22,6 +22,18 @@ export async function getUserFollowStatus({
   }
 }
 
+/** Resolve a sender's @username. Only the Meta API exposes it by IGSID. */
+export async function getUserProfile({
+  context,
+  recipientId,
+}: {
+  context: InstagramContext;
+  recipientId: string;
+}): Promise<{ username?: string; name?: string } | null> {
+  if (context.provider !== "META") return null;
+  return meta.getInstagramUserProfile(context.accessToken, recipientId);
+}
+
 export async function getMediaInsights({
   context,
   mediaId,

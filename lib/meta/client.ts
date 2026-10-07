@@ -299,6 +299,33 @@ export async function sendDirectMessageWithButton(
  * false, or `null` when Meta does not return the field — so callers can decide
  * how to treat the unverifiable case.
  */
+/**
+ * The @username behind an IGSID. Messaging webhooks carry only the id, so a
+ * DM-triggered log would otherwise show a number. Same User Profile API as
+ * the follow check below; null when Meta won't resolve it.
+ */
+export async function getInstagramUserProfile(
+  accessToken: string,
+  igsid: string
+): Promise<{ username?: string; name?: string } | null> {
+  const url = new URL(`${instagramGraphBase()}/${igsid}`);
+  url.searchParams.set("fields", "username,name");
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return {
+      username: typeof data?.username === "string" ? data.username : undefined,
+      name: typeof data?.name === "string" ? data.name : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function getUserFollowStatus(
   accessToken: string,
   recipientId: string
