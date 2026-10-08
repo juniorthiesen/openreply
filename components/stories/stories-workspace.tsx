@@ -13,6 +13,7 @@ import {
   type MediaAsset,
 } from "@/components/scheduling/shared";
 import { summarizeStorySequence } from "@/lib/story-metrics";
+import { StoryPlayer } from "@/components/stories/story-player";
 
 type StoryStatus = "DRAFT" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "PARTIAL" | "FAILED" | "CANCELED";
 interface StoryMetric {
@@ -344,13 +345,7 @@ export default function StoriesWorkspace() {
           </div>
 
           <aside className="rounded-2xl bg-sidebar p-4 sm:p-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Prévia</p>
-            <div className="mx-auto mt-4 flex aspect-[9/16] max-h-[420px] max-w-[236px] items-center justify-center overflow-hidden rounded-[28px] border-[5px] border-foreground/10 bg-black text-center text-white">
-              {orderedAssets[0]?.publicUrl && orderedAssets[0].contentType.startsWith("image/") ? <img src={orderedAssets[0].publicUrl} alt="Prévia do primeiro Story" className="h-full w-full object-cover" />
-                : orderedAssets[0] ? <video src={orderedAssets[0].publicUrl ?? undefined} className="h-full w-full object-contain" controls muted />
-                  : <div className="px-5"><span className="text-3xl">▧</span><p className="mt-3 text-sm text-white/70">A prévia do primeiro quadro aparece aqui</p></div>}
-            </div>
-            <p className="mx-auto mt-3 max-w-[236px] text-center text-xs text-muted">{orderedAssets.length ? `${orderedAssets.length} quadro${orderedAssets.length === 1 ? "" : "s"} na sequência · a ordem pode ser ajustada` : "Formato vertical recomendado para Stories."}</p>
+            <StoryPlayer assets={orderedAssets} username={account?.username ?? null} />
           </aside>
         </div>
 
