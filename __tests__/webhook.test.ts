@@ -378,6 +378,30 @@ describe("parseMessageEvents", () => {
     ]);
   });
 
+  it("should carry the Story a DM replies to", () => {
+    const payload = messagingPayload([
+      {
+        sender: { id: "user_999" },
+        recipient: { id: "ig_456" },
+        message: {
+          mid: "mid_story",
+          text: "SIM",
+          reply_to: { story: { id: "story_media_1", url: "https://cdn.example/story.jpg" } },
+        },
+      },
+    ]);
+
+    expect(parseMessageEvents(payload)).toEqual([
+      {
+        instagramAccountId: "ig_456",
+        messageId: "mid_story",
+        messageText: "SIM",
+        senderId: "user_999",
+        replyToStoryId: "story_media_1",
+      },
+    ]);
+  });
+
   it("should ignore echoes of the account's own messages", () => {
     const payload = messagingPayload([
       {

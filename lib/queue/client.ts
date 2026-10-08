@@ -75,6 +75,8 @@ export interface ProcessMessageJob {
   messageId: string;
   messageText: string;
   senderId: string;
+  /** Instagram media id of the Story this DM replies to, if any. */
+  replyToStoryId?: string;
 }
 
 export type DmQueueJob =

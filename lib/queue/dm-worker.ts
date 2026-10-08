@@ -1277,10 +1277,44 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
  * comments) and delivers the reveal directly, honouring the follow gate.
  * Dedup is per inbound message id, so each message triggers at most one reply.
  */
-async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
-  const { instagramAccountId, messageId, messageText, senderId } = job.data;
+/**
+ * Which DM-triggered campaigns may answer this message.
+ *
+ * A campaign created from a Stories sequence only answers replies to that
+ * sequence's Stories. When such a campaign matches, it answers alone: the
+ * person replied to that Story, so a general keyword campaign that happens to
+ * match too must not send a second DM.
+ */
+export async function selectMessageCampaigns<
+  T extends {
+    storySequenceId: string | null;
+    matchAnyWord: boolean;
+    keywords: string[];
+    wholeWordMatch: boolean;
+  },
+>(automations: T[], messageText: string, replyToStoryId?: string): Promise<T[]> {
+  const general = automations.filter((automation) => !automation.storySequenceId);
+  if (!replyToStoryId || general.length === automations.length) return general;
 
-  const automations = await prisma.automation.findMany({
+  const slide = await prisma.storySlide.findUnique({
+    where: { instagramMediaId: replyToStoryId },
+    select: { sequenceId: true },
+  });
+  if (!slide) return general;
+
+  const storyMatches = automations.filter(
+    (automation) =>
+      automation.storySequenceId === slide.sequenceId &&
+      (automation.matchAnyWord ||
+        matchKeywords(messageText, automation.keywords, automation.wholeWordMatch).matched)
+  );
+  return storyMatches.length > 0 ? storyMatches : general;
+}
+
+async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
+  const { instagramAccountId, messageId, messageText, senderId, replyToStoryId } = job.data;
+
+  const allAutomations = await prisma.automation.findMany({
     where: {
       ...connectionScope(job.data),
       dmTriggerEnabled: true,
@@ -1297,6 +1331,12 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     },
     orderBy: { createdAt: "asc" },
   });
+
+  const automations = await selectMessageCampaigns(
+    allAutomations,
+    messageText,
+    replyToStoryId
+  );
 
   const dedupeId = `dm:${messageId}`;
 
@@ -1338,6 +1378,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       commentText: messageText,
       commentId: dedupeId,
       matchedKeyword: matchResult.matchedKeyword,
+      storyMediaId: replyToStoryId ?? null,
     };
 
     if (!hasInstagramCredentials(automation.instagramAccount)) {

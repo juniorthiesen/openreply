@@ -14,6 +14,7 @@ import {
 } from "@/components/scheduling/shared";
 import { summarizeStorySequence } from "@/lib/story-metrics";
 import { StoryPlayer } from "@/components/stories/story-player";
+import { StoryReplyRules } from "@/components/stories/story-reply-rules";
 
 type StoryStatus = "DRAFT" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "PARTIAL" | "FAILED" | "CANCELED";
 interface StoryMetric {
@@ -342,6 +343,7 @@ export default function StoriesWorkspace() {
               </li>)}
             </ol> : <button type="button" onClick={() => fileRef.current?.click()} className="grid min-h-40 w-full place-items-center rounded-2xl border border-dashed border-border bg-bg px-6 text-center hover:border-accent/50"><span><span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-xl text-accent">＋</span><span className="block text-sm font-semibold text-foreground">Envie ou escolha mídias da biblioteca</span><span className="mt-1 block text-xs text-muted">JPG, PNG, WebP, MP4 ou MOV. Até 20 quadros.</span></span></button>}
             {assets.length > 0 && <div className="mt-4"><p className="mb-2 text-xs font-medium text-muted">Biblioteca desta conta</p><div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">{assets.filter((asset) => !selectedIds.includes(asset.id)).map((asset) => <button key={asset.id} type="button" onClick={() => setSelectedIds((current) => current.length < 20 ? [...current, asset.id] : current)} className="max-w-full truncate rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-accent">＋ {asset.fileName}</button>)}</div></div>}
+            <StoryReplyRules key={editingId ?? "new"} sequenceId={editingId} editable />
           </div>
 
           <aside className="rounded-2xl bg-sidebar p-4 sm:p-5">
@@ -376,6 +378,7 @@ export default function StoriesWorkspace() {
               <div className="mt-4 grid grid-cols-3 gap-2"><div className="rounded-lg bg-bg p-2.5"><p className="text-[11px] text-muted">Alcance inicial</p><p className="mt-1 text-sm font-semibold tabular-nums text-foreground">{summary.firstReach?.toLocaleString("pt-BR") ?? "—"}</p></div><div className="rounded-lg bg-bg p-2.5"><p className="text-[11px] text-muted">Último quadro</p><p className="mt-1 text-sm font-semibold tabular-nums text-foreground">{summary.lastReach?.toLocaleString("pt-BR") ?? "—"}</p></div><div className="rounded-lg bg-bg p-2.5"><p className="text-[11px] text-muted">Conclusão</p><p className="mt-1 text-sm font-semibold tabular-nums text-foreground">{pct(summary.completionRate)}</p></div></div>
               <div className="mt-4 space-y-2">{sequence.slides.map((slide, index) => { const metric = slide.metrics[0]; const first = summary.firstReach ?? 0; const rate = metric?.reach !== null && metric?.reach !== undefined && first > 0 ? Math.min(1, metric.reach / first) : null; return <div key={slide.id} className="flex items-center gap-3"><span className="w-16 shrink-0 text-xs text-muted">Quadro {index + 1}</span><div className="h-2 flex-1 overflow-hidden rounded-full bg-border"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(rate === null ? 0 : 4, (rate ?? 0) * 100)}%` }} /></div><span className="w-14 text-right text-xs tabular-nums text-muted">{metric?.reach?.toLocaleString("pt-BR") ?? "—"}</span></div>; })}</div>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted"><span>{summary.replies} respostas</span><span>{summary.shares} compartilhamentos</span><span>{summary.exits} saídas</span></div>
+              <StoryReplyRules sequenceId={sequence.id} editable={false} />
               <p className="mt-3 text-[11px] text-muted">Métricas consultadas periodicamente enquanto disponíveis pela Meta. A duplicação cria um rascunho editável.</p>
             </article>;
           })}</div>}

@@ -278,6 +278,10 @@ model Automation {
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
   reportShareEnabled Boolean @default(true)
+  // Set for a "reply with a keyword" rule created from a Stories sequence.
+  // Such a campaign only fires on DMs that reply to one of that sequence's
+  // published Stories, so a common word like SIM can't trigger elsewhere.
+  storySequenceId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -288,10 +292,12 @@ model Automation {
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
   scheduledPost    ScheduledPost?
+  storySequence    StorySequence?   @relation(fields: [storySequenceId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([instagramAccountId])
   @@index([postId])
+  @@index([storySequenceId])
 }
 
 model ScheduledPost {
@@ -364,6 +370,7 @@ model StorySequence {
   workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   slides           StorySlide[]
+  replyCampaigns   Automation[]
 
   @@index([workspaceId, instagramAccountId, scheduledAt])
   @@index([instagramAccountId, status, scheduledAt])
@@ -437,6 +444,8 @@ model DmLog {
   publicReplyDeliveryUnconfirmed Boolean @default(false)
   publicReplySentAt DateTime?
   publicReplyError  String?
+  // Instagram media id of the Story this DM replied to, when it was one.
+  storyMediaId      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -450,6 +459,7 @@ model DmLog {
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([status])
+  @@index([storyMediaId])
 }
 
 // Legacy reconciliation model; currently unwired. Runtime code does not read
