@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import { FacebookConnectNotice } from "@/components/facebook-connect-notice";
+import { InstagramManualTokenForm } from "@/components/instagram-manual-token-form";
 
 interface SettingsData {
   workspace: {
@@ -274,6 +275,7 @@ export default function SettingsPage() {
             {accounts.length > 0 ? "Conectar outra conta" : "Conectar Instagram"}
           </a>
         </div>
+        <InstagramManualTokenForm />
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
