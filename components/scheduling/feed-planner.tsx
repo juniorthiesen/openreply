@@ -24,6 +24,8 @@ interface PlannedTile {
   type: string;
   caption: string;
   isCarousel: boolean;
+  isVideo: boolean;
+  isReel: boolean;
 }
 
 function monthTitle(date: Date): string {
@@ -93,10 +95,10 @@ export default function FeedPlanner() {
     return [
       ...scheduled
         .filter((post) => post.shareToFeed || post.mediaType !== "REEL")
-        .map((post) => ({ id: `scheduled-${post.id}`, url: post.mediaUrl ?? null, date: post.scheduledAt!, type: post.mediaType === "CAROUSEL" ? "Carrossel agendado" : post.mediaType === "REEL" ? "Reel agendado" : "Foto agendada", caption: post.caption, isCarousel: post.mediaType === "CAROUSEL" })),
+        .map((post) => ({ id: `scheduled-${post.id}`, url: post.mediaUrl ?? null, date: post.scheduledAt!, type: post.mediaType === "CAROUSEL" ? "Carrossel agendado" : post.mediaType === "REEL" ? "Reel agendado" : "Foto agendada", caption: post.caption, isCarousel: post.mediaType === "CAROUSEL", isVideo: post.mediaAsset.contentType.startsWith("video/"), isReel: post.mediaType === "REEL" })),
       ...published
         .filter((post) => (post.shareToFeed || post.mediaType !== "REEL") && (!post.instagramMediaId || !apiMediaIds.has(post.instagramMediaId)))
-        .map((post) => ({ id: `published-${post.id}`, url: post.mediaUrl ?? null, date: post.publishedAt ?? post.createdAt, type: post.mediaType === "CAROUSEL" ? "Carrossel publicado" : post.mediaType === "REEL" ? "Reel publicado" : "Foto publicada", caption: post.caption, isCarousel: post.mediaType === "CAROUSEL" })),
+        .map((post) => ({ id: `published-${post.id}`, url: post.mediaUrl ?? null, date: post.publishedAt ?? post.createdAt, type: post.mediaType === "CAROUSEL" ? "Carrossel publicado" : post.mediaType === "REEL" ? "Reel publicado" : "Foto publicada", caption: post.caption, isCarousel: post.mediaType === "CAROUSEL", isVideo: post.mediaAsset.contentType.startsWith("video/"), isReel: post.mediaType === "REEL" })),
       ...instagramPosts.map((post) => ({
         id: `instagram-${post.id}`,
         url: post.media_type === "VIDEO" ? post.thumbnail_url ?? post.media_url ?? null : post.media_url ?? null,
@@ -104,6 +106,9 @@ export default function FeedPlanner() {
         type: post.media_type === "CAROUSEL_ALBUM" ? "Carrossel" : post.media_type === "VIDEO" || post.media_product_type === "REELS" ? "Reel" : "Publicação",
         caption: post.caption ?? "",
         isCarousel: post.media_type === "CAROUSEL_ALBUM",
+        // Meta's thumbnail is an image; only fall back to the video itself.
+        isVideo: post.media_type === "VIDEO" && !post.thumbnail_url,
+        isReel: post.media_type === "VIDEO" || post.media_product_type === "REELS",
       })),
     ].sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, 15);
   }, [instagramPosts, published, scheduled]);
@@ -151,6 +156,27 @@ export default function FeedPlanner() {
 
   const calendarDaysWithItems = scheduledByDay.get(selectedDay) ?? [];
   const todayKey = localDayKey(new Date());
+
+  // Reels queued without "show in feed" only land in the Reels tab, so the grid
+  // preview leaves them out. Say so, and offer the one-click fix.
+  const hiddenReels = scheduled.filter((post) => post.mediaType === "REEL" && !post.shareToFeed && !post.trialGraduationStrategy);
+
+  async function showReelsInFeed() {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest(`/api/scheduled-posts/share-to-feed`, {
+        method: "POST",
+        body: JSON.stringify({ ids: hiddenReels.map((post) => post.id) }),
+      });
+      const freshPosts = await apiRequest<ScheduledPost[]>(`/api/scheduled-posts?instagramAccountId=${encodeURIComponent(accountId)}`);
+      setPosts((current) => [...current.filter((post) => post.instagramAccountId !== accountId), ...freshPosts]);
+      setNotice("Os Reels agendados agora também vão aparecer na grade do perfil.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível atualizar os Reels.");
+    } finally { setSaving(false); }
+  }
 
   async function saveOrder() {
     if (reorderIds.length < 2) return;
@@ -276,8 +302,10 @@ export default function FeedPlanner() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><p className="text-xs font-medium text-muted">Prévia do perfil</p><h2 className="mt-0.5 text-base font-semibold">Assim a grade pode ficar</h2></div><span className="text-xs text-muted">Atualizada com as publicações agendadas</span></div>
           <div className="p-4 sm:p-5">
             <div className="mb-4 flex items-center gap-3"><ProfileAvatar username={profile?.username ?? account?.username ?? "?"} url={profile?.profilePictureUrl} /><div className="min-w-0"><p className="truncate text-sm font-semibold">@{profile?.username ?? account?.username ?? "instagram"}</p><p className="truncate text-xs text-muted">{profile?.name ?? "Perfil do Instagram"}</p></div><span className="ml-auto rounded-lg bg-background px-2.5 py-1.5 text-[11px] font-medium text-muted">{profilePostCount} posts</span></div>
+            {hiddenReels.length > 0 && <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-warning/10 px-4 py-3 text-xs leading-5 text-warning"><p className="min-w-0 flex-1"><span className="font-semibold">{hiddenReels.length === 1 ? "1 Reel agendado não vai aparecer na grade" : `${hiddenReels.length} Reels agendados não vão aparecer na grade`}</span>, só na aba Reels do perfil, porque estão sem “Mostrar também no feed”.</p><button type="button" disabled={saving} onClick={() => void showReelsInFeed()} className="shrink-0 rounded-[10px] bg-foreground px-3.5 py-2 text-xs font-semibold text-white hover:bg-foreground/90 disabled:opacity-50">Mostrar no feed</button></div>}
             {loading ? <div className="grid grid-cols-3 gap-2 sm:gap-3">{Array.from({ length: 9 }, (_, index) => <div key={index} className="aspect-[3/4] animate-pulse rounded-lg bg-background" />)}</div> : profileTiles.length === 0 ? <div className="rounded-xl bg-background px-5 py-9 text-center"><p className="text-sm font-medium">Ainda não há publicações para pré-visualizar</p><p className="mt-1 text-xs text-muted">Os próximos posts aparecem aqui assim que forem agendados.</p></div> : <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5">{profileTiles.map((item) => <article key={item.id} className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-sidebar">
-              {item.url ? <img src={item.url} alt={item.caption ? item.caption.slice(0, 120) : item.type} className={`h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025] ${item.id.startsWith("scheduled-") ? "brightness-[0.88]" : ""}`} /> : <div className="grid h-full place-items-center px-2 text-center text-[10px] text-muted">Prévia indisponível</div>}
+              {item.url ? <MediaThumb url={item.url} isVideo={item.isVideo} alt={item.caption ? item.caption.slice(0, 120) : item.type} className={`h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025] ${item.id.startsWith("scheduled-") ? "brightness-[0.88]" : ""}`} /> : <div className="grid h-full place-items-center px-2 text-center text-[10px] text-muted">Prévia indisponível</div>}
+              {item.isReel && !item.isCarousel && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded bg-foreground/70 text-white" title="Reel"><ReelIcon /></span>}
               {item.id.startsWith("scheduled-") && <span className="absolute left-1.5 top-1.5 rounded bg-surface/90 px-1.5 py-1 text-[9px] font-semibold text-accent">AGENDADO</span>}
               {item.isCarousel && <span className="absolute right-1.5 top-1.5 rounded bg-foreground/80 px-1.5 py-1 text-[8px] font-semibold leading-none text-white">CARROSSEL</span>}
               <div className="absolute inset-x-0 bottom-0 translate-y-full bg-foreground/80 px-2 py-1.5 text-white transition-transform group-hover:translate-y-0"><p className="truncate text-[10px] font-medium">{new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" }).format(new Date(item.date))} · {item.type}</p></div>
@@ -286,7 +314,7 @@ export default function FeedPlanner() {
           </div>
         </section>
 
-        <section className="panel p-5 sm:p-6"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-muted">Próximas datas</p><h2 className="mt-1 text-base font-semibold">Publicações na fila</h2></div><Link href="/schedule" className="text-xs font-semibold text-accent hover:underline">Criar publicação</Link></div>{scheduled.length === 0 ? <div className="mt-4 rounded-xl bg-background px-4 py-5 text-center"><p className="text-sm font-medium">Nenhuma publicação agendada</p><p className="mt-1 text-xs text-muted">A próxima data vai aparecer nesta lista.</p></div> : <div className="mt-4 divide-y divide-border">{scheduled.slice().sort((a, b) => Date.parse(a.scheduledAt!) - Date.parse(b.scheduledAt!)).slice(0, 8).map((post) => <div key={post.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><span className="text-center"><span className="block text-[9px] font-semibold uppercase leading-none">{new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(new Date(post.scheduledAt!)).replace(".", "")}</span><span className="mt-1 block text-sm font-bold leading-none">{new Date(post.scheduledAt!).getDate()}</span></span></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{post.caption || post.mediaAsset.fileName}</p><p className="mt-1 text-[10px] text-muted">{formatDateTime(post.scheduledAt, post.timeZone)}</p></div><span className="rounded-md bg-background px-2 py-1 text-[10px] font-medium text-muted">{post.mediaType === "CAROUSEL" ? "Carrossel" : post.mediaType === "REEL" ? "Reel" : "Foto"}</span></div>)}</div>}</section>
+        <section className="panel p-5 sm:p-6"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-muted">Próximas datas</p><h2 className="mt-1 text-base font-semibold">Publicações na fila</h2></div><Link href="/schedule" className="text-xs font-semibold text-accent hover:underline">Criar publicação</Link></div>{scheduled.length === 0 ? <div className="mt-4 rounded-xl bg-background px-4 py-5 text-center"><p className="text-sm font-medium">Nenhuma publicação agendada</p><p className="mt-1 text-xs text-muted">A próxima data vai aparecer nesta lista.</p></div> : <div className="mt-4 divide-y divide-border">{scheduled.slice().sort((a, b) => Date.parse(a.scheduledAt!) - Date.parse(b.scheduledAt!)).slice(0, 8).map((post) => <div key={post.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><span className="relative aspect-[3/4] w-10 shrink-0 overflow-hidden rounded-lg bg-sidebar">{post.mediaUrl ? <MediaThumb url={post.mediaUrl} isVideo={post.mediaAsset.contentType.startsWith("video/")} alt="" className="h-full w-full object-cover" /> : null}{post.mediaType === "REEL" && <span className="absolute bottom-0.5 right-0.5 grid h-4 w-4 place-items-center rounded bg-foreground/70 text-white"><ReelIcon size={9} /></span>}</span><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><span className="text-center"><span className="block text-[9px] font-semibold uppercase leading-none">{new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(new Date(post.scheduledAt!)).replace(".", "")}</span><span className="mt-1 block text-sm font-bold leading-none">{new Date(post.scheduledAt!).getDate()}</span></span></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{post.caption || post.mediaAsset.fileName}</p><p className="mt-1 text-[10px] text-muted">{formatDateTime(post.scheduledAt, post.timeZone)}</p></div><span className="flex shrink-0 flex-col items-end gap-1"><span className="rounded-md bg-background px-2 py-1 text-[10px] font-medium text-muted">{post.mediaType === "CAROUSEL" ? "Carrossel" : post.mediaType === "REEL" ? post.trialGraduationStrategy ? "Reel de teste" : "Reel" : "Foto"}</span>{post.mediaType === "REEL" && !post.shareToFeed && !post.trialGraduationStrategy && <span className="rounded-md bg-warning/10 px-2 py-1 text-[10px] font-medium text-warning">Só na aba Reels</span>}</span></div>)}</div>}</section>
       </div>
     </div>
   </div>;
@@ -297,3 +325,12 @@ function ProfileAvatar({ username, url }: { username: string; url?: string | nul
 }
 
 function CalendarIcon() { return <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>; }
+
+/** First frame of a video stands in for a thumbnail until Meta generates one. */
+function MediaThumb({ url, isVideo, alt, className }: { url: string; isVideo: boolean; alt: string; className: string }) {
+  return isVideo
+    ? <video src={`${url}#t=0.1`} preload="metadata" muted playsInline aria-label={alt || undefined} className={className} />
+    : <img src={url} alt={alt} className={className} />;
+}
+
+function ReelIcon({ size = 12 }: { size?: number }) { return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>; }

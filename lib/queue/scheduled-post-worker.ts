@@ -17,7 +17,11 @@ import {
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { getMediaPublicUrl } from "@/lib/media-assets";
-import { classifyInstagramPublishError, describeContainerFailure } from "@/lib/meta/publish-error";
+import {
+  classifyInstagramPublishError,
+  describeContainerFailure,
+  TRIAL_REELS_UNSUPPORTED_SUBCODE,
+} from "@/lib/meta/publish-error";
 import { getRedisConnection } from "@/lib/queue/client";
 import {
   PublishScheduledPostJob,
@@ -39,6 +43,12 @@ function isRateLimitCode(code: number) {
  */
 async function toPublishFailure(error: MetaApiError, instagramAccountId: string): Promise<Error> {
   const failure = classifyInstagramPublishError(error.code, error.message, error.subcode);
+  if (error.subcode === TRIAL_REELS_UNSUPPORTED_SUBCODE) {
+    await prisma.instagramAccount.updateMany({
+      where: { id: instagramAccountId, trialReelsUnsupportedAt: null },
+      data: { trialReelsUnsupportedAt: new Date() },
+    });
+  }
   if (failure.permissionRevoked) {
     await prisma.instagramAccount.updateMany({
       where: { id: instagramAccountId },

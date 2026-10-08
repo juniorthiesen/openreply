@@ -142,6 +142,9 @@ model InstagramAccount {
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean  @default(false)
   authProvider      InstagramAuthProvider @default(INSTAGRAM_LOGIN)
+  // When Meta refused a trial Reel for this account (subcode 2207081). The
+  // composer disables the option instead of letting the next one fail too.
+  trialReelsUnsupportedAt DateTime?
   facebookPageId    String?
   publishingPermissionGranted Boolean @default(false)
   connectedAt       DateTime @default(now())

@@ -5,6 +5,8 @@ export interface InstagramAccountOption {
   name?: string | null;
   publishingPermissionGranted: boolean;
   storyPublishingReady?: boolean;
+  /** Set once Meta refused a trial Reel for this account. */
+  trialReelsUnsupportedAt?: string | null;
 }
 
 export interface MediaAsset {

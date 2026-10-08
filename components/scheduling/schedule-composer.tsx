@@ -472,8 +472,21 @@ export default function ScheduleComposer() {
           <p className="mt-2 text-[11px] leading-5 text-muted">A conexão atual usa Instagram Login. A API da Meta não aceita marcar pessoas ou locais nesse fluxo.</p>
           {!isCarousel && selectedAsset?.contentType.startsWith("video/") && <div className="mt-4 space-y-3 rounded-xl bg-background px-3.5 py-3">
             <label className="flex cursor-pointer items-start gap-3">
-              <input type="checkbox" checked={trialGraduationStrategy !== null} onChange={(event) => setTrialGraduationStrategy(event.target.checked ? "MANUAL" : null)} className="mt-0.5 accent-accent" />
-              <span><span className="block text-sm font-medium">Publicar como Reel de teste</span><span className="mt-0.5 block text-xs leading-5 text-muted">O Instagram testa o Reel com pessoas que ainda não seguem a conta. Ele não entra no feed inicialmente.</span></span>
+              <input
+                type="checkbox"
+                checked={trialGraduationStrategy !== null}
+                disabled={Boolean(account?.trialReelsUnsupportedAt) && trialGraduationStrategy === null}
+                onChange={(event) => {
+                  setTrialGraduationStrategy(event.target.checked ? "MANUAL" : null);
+                  // A trial Reel forces "not in the feed"; leaving trial mode
+                  // puts the Reel back on the grid, as a fresh one would be.
+                  if (!event.target.checked) setShareToFeed(true);
+                }}
+                className="mt-0.5 accent-accent disabled:opacity-50"
+              />
+              <span><span className="block text-sm font-medium">Publicar como Reel de teste</span><span className="mt-0.5 block text-xs leading-5 text-muted">O Instagram testa o Reel com pessoas que ainda não seguem a conta. Ele não entra no feed inicialmente.</span>
+                {account?.trialReelsUnsupportedAt && <span className="mt-1.5 block rounded-lg bg-warning/10 px-2.5 py-1.5 text-xs leading-5 text-warning">A Meta ainda não liberou Reels de teste para @{account.username}. Publique como Reel normal; quando a opção aparecer no app do Instagram, ela volta a funcionar aqui.</span>}
+              </span>
             </label>
             {trialGraduationStrategy ? <label className="block pl-6"><span className="mb-1.5 block text-xs font-semibold text-muted">Como o Reel será compartilhado depois?</span><select value={trialGraduationStrategy} onChange={(event) => setTrialGraduationStrategy(event.target.value as TrialReelGraduationStrategy)} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"><option value="MANUAL">Manual: eu decido depois</option><option value="SS_PERFORMANCE">Automático, se o desempenho for bom</option></select><span className="mt-1.5 block text-[11px] leading-5 text-muted">Na opção automática, a Meta decide se compartilha o Reel com todos. A disponibilidade depende da conta.</span></label> : <label className="flex cursor-pointer items-start gap-3 border-t border-border pt-3">
               <input type="checkbox" checked={shareToFeed} onChange={(event) => setShareToFeed(event.target.checked)} className="mt-0.5 accent-accent" />

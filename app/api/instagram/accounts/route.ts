@@ -28,6 +28,7 @@ export async function GET() {
       instagramId: true,
       name: true,
       publishingPermissionGranted: true,
+      trialReelsUnsupportedAt: true,
     },
   });
 
