@@ -113,6 +113,39 @@ export function InstagramConnectNotice() {
     );
   }
 
+  if (status === "not_tester") {
+    return (
+      <Notice tone="warning" title="Esta conta ainda não tem acesso ao app">
+        <p>
+          Enquanto o app da Meta não tiver aprovação pública, só contas
+          convidadas como testadoras conseguem se conectar. Para liberar esta
+          conta:
+        </p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5">
+          <li>
+            Um administrador do app abre o painel da Meta para desenvolvedores,
+            em <span className="font-medium">Funções do app → Funções → Adicionar
+            pessoas → Testador do Instagram</span>, e envia o convite para o @ da
+            conta.
+          </li>
+          <li>
+            Na conta convidada, aceite o convite em{" "}
+            <a
+              href="https://www.instagram.com/accounts/manage_access/"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium underline"
+            >
+              instagram.com → Apps e sites → Convites de testador
+            </a>
+            .
+          </li>
+          <li>Volte aqui e clique em Conectar Instagram de novo.</li>
+        </ol>
+      </Notice>
+    );
+  }
+
   if (status === "failed") {
     const reason = searchParams.get("reason");
 

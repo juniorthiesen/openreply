@@ -140,6 +140,13 @@ export async function GET(request: NextRequest) {
       })
       .catch(() => {});
 
+    // Meta refuses the long-lived token exchange this way when the account has
+    // no role on the app (Standard Access, or the app in development mode).
+    // Seen on every non-tester account; the raw text points nowhere near that.
+    if (/Unsupported request - method type: get[^]*access_token/i.test(message)) {
+      return NextResponse.redirect(`${baseUrl}/settings?instagram=not_tester`);
+    }
+
     return NextResponse.redirect(
       `${baseUrl}/settings?instagram=failed&reason=${encodeURIComponent(
         message.slice(0, 200)
