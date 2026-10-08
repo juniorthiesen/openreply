@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-10-08T01:48:05.564Z",
+        "reason": "Fisga brandbook (redesign/Brandbook-html, section 04 Tipografia) specifies Geist as the body/interface face; app/globals.css already uses it"
+      }
+    ]
+  }
+}

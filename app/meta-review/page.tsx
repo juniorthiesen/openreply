@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import LegalShell from "@/components/legal-shell";
+import LegalShell, { LegalSection } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
   title: "Suporte para análise do app pela Meta - FISGA",
@@ -12,11 +12,9 @@ export default function MetaReviewPage() {
     <LegalShell
       title="Suporte para análise do app pela Meta"
       description="A FISGA foi criada para contas profissionais do Instagram que desejam enviar respostas privadas após comentários com palavras-chave em publicações próprias ou Reels."
-      updatedAt="May 24, 2026"
     >
-      <section>
-        <h2 className="text-xl font-bold text-white">Fluxo de uso</h2>
-        <p className="mt-3">
+      <LegalSection title="Fluxo de uso">
+        <p>
           O responsável pela empresa entra com o e-mail, conecta uma conta
           profissional do Instagram pelo OAuth da Meta e cria uma campanha com
           palavra-chave para uma publicação ou Reel. Quando alguém comenta, a
@@ -24,27 +22,25 @@ export default function MetaReviewPage() {
           limites de envio e então envia uma resposta privada usando o ID do
           comentário.
         </p>
-      </section>
+      </LegalSection>
 
-      <section>
-        <h2 className="text-xl font-bold text-white">Conformidade</h2>
-        <p className="mt-3">
+      <LegalSection title="Conformidade">
+        <p>
           O app usa as APIs oficiais da Meta, verifica assinaturas de webhook,
           criptografa tokens, não coleta senhas e não faz scraping. Para cada par
           de campanha e comentário correspondente, envia no máximo uma resposta
           privada.
         </p>
-      </section>
+      </LegalSection>
 
-      <section>
-        <h2 className="text-xl font-bold text-white">Notas para teste</h2>
-        <p className="mt-3">
+      <LegalSection title="Notas para teste">
+        <p>
           Para testar, use uma empresa de teste da Meta, conecte uma conta
           profissional do Instagram, crie uma palavra-chave como LINK e comente
           essa palavra na mídia selecionada. Em seguida, confirme que a resposta
           privada foi enviada e registrada uma única vez.
         </p>
-      </section>
+      </LegalSection>
     </LegalShell>
   );
 }
