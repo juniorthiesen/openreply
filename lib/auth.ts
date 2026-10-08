@@ -2,13 +2,15 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Nodemailer from "next-auth/providers/nodemailer";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import { createTransport } from "nodemailer";
+import { renderMagicLinkEmail } from "@/lib/email/magic-link";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 import { isEmailAllowedToSignIn } from "@/lib/env";
 
 type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
 
-const emailFrom = process.env.EMAIL_FROM ?? "FISGA <login@example.com>";
+const emailFrom = process.env.EMAIL_FROM ?? "Fisga <login@example.com>";
 // Setting EMAIL_SERVER switches magic links to your own SMTP server, for
 // self-hosters who do not want a third-party mail service. Resend stays the
 // default, so an existing deployment is unaffected.
@@ -23,11 +25,42 @@ export const EMAIL_PROVIDER_ID = smtpServer ? "nodemailer" : "resend";
 export const authConfig = {
   adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
+    // Both transports send the Fisga-branded email instead of Auth.js's
+    // generic English one; failure handling mirrors the stock providers.
     smtpServer
-      ? Nodemailer({ server: smtpServer, from: emailFrom })
+      ? Nodemailer({
+          server: smtpServer,
+          from: emailFrom,
+          async sendVerificationRequest({ identifier, url, provider }) {
+            const email = renderMagicLinkEmail({ url });
+            const result = await createTransport(provider.server).sendMail({
+              to: identifier,
+              from: provider.from,
+              ...email,
+            });
+            const failed = (result.rejected ?? []).filter(Boolean);
+            if (failed.length) {
+              throw new Error(`Email (${failed.join(", ")}) could not be sent`);
+            }
+          },
+        })
       : Resend({
           apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
           from: emailFrom,
+          async sendVerificationRequest({ identifier, url, provider }) {
+            const email = renderMagicLinkEmail({ url });
+            const res = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${provider.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ from: provider.from, to: identifier, ...email }),
+            });
+            if (!res.ok) {
+              throw new Error("Resend error: " + JSON.stringify(await res.json()));
+            }
+          },
         }),
   ],
   callbacks: {

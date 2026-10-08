@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BrandLogo, BrandMark } from "@/components/brand-logo";
 
 export const metadata: Metadata = {
   title: "FISGA | Comentários que viram conversas",
@@ -21,27 +22,6 @@ export const metadata: Metadata = {
 };
 
 const appUrl = (path: string) => `/login?callbackUrl=${encodeURIComponent(path)}`;
-
-function BrandMark({ dark = false }: { dark?: boolean }) {
-  return (
-    <span
-      className={`grid size-10 shrink-0 place-items-center rounded-[14px] ${
-        dark ? "bg-white text-[#16181D]" : "bg-[#16181D] text-white"
-      }`}
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 24 24" className="size-6" fill="none">
-        <path
-          d="M5.25 6.75A3.75 3.75 0 0 1 9 3h7.5a3.75 3.75 0 0 1 3.75 3.75v6A3.75 3.75 0 0 1 16.5 16.5h-5.2l-4.8 4v-4.27a3.74 3.74 0 0 1-1.25-2.8v-6.68Z"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinejoin="round"
-        />
-        <path d="M9 9.75h7.5M9 12.75h4.5" stroke="#F26B3A" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
-}
 
 function ArrowUpRight() {
   return (
@@ -92,9 +72,8 @@ export default function HomePage() {
     <main className="min-h-screen overflow-hidden bg-[#F6F4EF] text-[#16181D]">
       <header className="sticky top-0 z-40 border-b border-[#E2DDD1] bg-[#F6F4EF]/95 backdrop-blur">
         <div className="mx-auto flex h-[76px] max-w-[1320px] items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-3" aria-label="FISGA, página inicial">
-            <BrandMark />
-            <span className="font-display text-[21px] font-bold tracking-[-0.04em]">FISGA</span>
+          <Link href="/" className="flex items-center gap-3" aria-label="Fisga, página inicial">
+            <BrandLogo size={40} />
           </Link>
           <nav aria-label="Navegação principal" className="hidden items-center gap-8 md:flex">
             <a className="text-sm text-[#595A5D] transition hover:text-[#C23E17]" href="#como">Como funciona</a>
@@ -145,7 +124,7 @@ export default function HomePage() {
           <div className="relative rounded-[32px] border border-[#E2DDD1] bg-white p-3 shadow-[0_30px_90px_-44px_rgba(35,31,27,0.3)] sm:p-5">
             <div className="flex items-center justify-between border-b border-[#EEEAE2] px-2 pb-4 sm:px-3">
               <div className="flex items-center gap-3">
-                <BrandMark />
+                <BrandMark size={40} />
                 <div>
                   <p className="text-sm font-bold">Campanha ativa</p>
                   <p className="mt-0.5 text-xs text-[#737378]">Comentário para mensagem</p>
@@ -318,7 +297,7 @@ export default function HomePage() {
 
       <footer className="bg-[#16181D] text-white">
         <div className="mx-auto flex max-w-[1320px] flex-col gap-8 px-5 py-9 sm:px-8 md:flex-row md:items-center md:justify-between">
-          <Link href="/" className="flex items-center gap-3" aria-label="FISGA, página inicial"><BrandMark dark /><span className="font-display text-lg font-bold tracking-[-0.04em]">FISGA</span></Link>
+          <Link href="/" className="flex items-center gap-3" aria-label="Fisga, página inicial"><BrandLogo size={36} variant="negative" /></Link>
           <nav aria-label="Links do rodapé" className="flex flex-wrap gap-x-6 gap-y-3 text-xs text-white/65">
             <Link href="/privacy" className="transition hover:text-white">Privacidade</Link>
             <Link href="/terms" className="transition hover:text-white">Termos de uso</Link>

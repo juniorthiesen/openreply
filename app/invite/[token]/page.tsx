@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import InvitationAcceptCard from "@/components/invitation-accept-card";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { BrandLogo } from "@/components/brand-logo";
 
 type InvitePageProps = {
   params: Promise<{ token: string }>;
@@ -35,8 +36,8 @@ export default async function InvitePage({ params }: InvitePageProps) {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-5 py-12">
-        <Link href="/" className="mb-8 text-sm font-bold text-cyan-100">
-          FISGA
+        <Link href="/" className="mb-8 self-start" aria-label="Fisga, página inicial">
+          <BrandLogo size={32} />
         </Link>
         <section className="border border-white/10 bg-white/[0.035] p-8">
           <p className="text-xs font-semibold uppercase tracking-wide text-cyan-100">

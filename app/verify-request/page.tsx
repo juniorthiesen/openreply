@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 
 export const metadata = {
   title: "Verifique seu e-mail - FISGA",
@@ -10,8 +11,9 @@ export default function VerifyRequestPage() {
     <div className="min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-foreground">
-            FISGA
+          <h1 className="flex justify-center">
+            <BrandLogo size={44} />
+            <span className="sr-only">Fisga</span>
           </h1>
         </div>
 
