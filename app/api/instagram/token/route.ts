@@ -8,6 +8,7 @@ import {
   type InstagramUser,
 } from "@/lib/meta/client";
 import { encryptToken } from "@/lib/meta/oauth";
+import { isManualTokenLoginEnabled } from "@/lib/env";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -15,7 +16,15 @@ import {
 
 const MAX_TOKEN_LENGTH = 4096;
 
+/** Lets the Settings form know whether to render at all. */
+export async function GET() {
+  return NextResponse.json({ success: true, data: { enabled: isManualTokenLoginEnabled() } });
+}
+
 export async function POST(request: NextRequest) {
+  if (!isManualTokenLoginEnabled()) {
+    return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
+  }
   const context = await getCurrentWorkspaceContext();
   if (!context) {
     return NextResponse.json(

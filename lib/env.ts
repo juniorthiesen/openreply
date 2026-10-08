@@ -62,6 +62,15 @@ export function getMissingFacebookOAuthEnv(): string[] {
   });
 }
 
+/**
+ * Connecting Instagram by pasting an access token skips Meta's OAuth screen.
+ * Handy while the app has no Advanced Access, but a reviewer may read it as a
+ * way around the official login, so it is off unless explicitly enabled.
+ */
+export function isManualTokenLoginEnabled(): boolean {
+  return process.env.INSTAGRAM_MANUAL_TOKEN_ENABLED === "true";
+}
+
 export function getMetaGraphApiVersion(): string {
   return process.env.META_GRAPH_API_VERSION ?? "v25.0";
 }

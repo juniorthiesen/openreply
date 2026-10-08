@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function InstagramManualTokenForm() {
+  // Hidden unless the server enables it (INSTAGRAM_MANUAL_TOKEN_ENABLED).
+  const [enabled, setEnabled] = useState(false);
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -33,6 +35,21 @@ export function InstagramManualTokenForm() {
       setPending(false);
     }
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/instagram/token")
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!cancelled) setEnabled(Boolean(payload?.data?.enabled));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!enabled) return null;
 
   return (
     <details className="mt-4 border-t border-border pt-4">
