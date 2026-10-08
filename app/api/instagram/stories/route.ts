@@ -9,16 +9,24 @@ import { resolveStoryPublishingPage } from "@/lib/instagram-stories/page-link";
 
 export const dynamic = "force-dynamic";
 
-const saveSchema = z.object({
+const saveFields = z.object({
   instagramAccountId: z.string().min(1),
   title: z.string().trim().min(1).max(120),
   mediaAssetIds: z.array(z.string().min(1)).min(1).max(20),
   mode: z.enum(["DRAFT", "SCHEDULE", "NOW"]),
   scheduledAt: z.string().datetime().optional(),
   timeZone: z.string().min(1).max(100),
-}).refine((value) => new Set(value.mediaAssetIds).size === value.mediaAssetIds.length, {
-  message: "Selecione arquivos diferentes para cada quadro.",
 });
+const distinctFrames = {
+  check: (value: { mediaAssetIds: string[] }) => new Set(value.mediaAssetIds).size === value.mediaAssetIds.length,
+  message: "Selecione arquivos diferentes para cada quadro.",
+};
+const saveSchema = saveFields.refine(distinctFrames.check, { message: distinctFrames.message });
+// Zod 4 refuses .omit() on a refined schema (it threw on every edit), so the
+// edit schema is derived from the plain fields and refined again.
+const updateSchema = saveFields
+  .omit({ instagramAccountId: true })
+  .refine(distinctFrames.check, { message: distinctFrames.message });
 
 function validTimeZone(value: string): boolean {
   try { new Intl.DateTimeFormat("pt-BR", { timeZone: value }); return true; }
@@ -128,7 +136,7 @@ export async function PATCH(request: NextRequest) {
   if (!canManageWorkspace(context.role)) return NextResponse.json({ success: false, error: "Só pessoas administradoras podem editar Stories." }, { status: 403 });
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ success: false, error: "Sequência não encontrada." }, { status: 400 });
-  const parsed = saveSchema.omit({ instagramAccountId: true }).safeParse(await request.json().catch(() => null));
+  const parsed = updateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ success: false, error: parsed.error.issues[0]?.message ?? "Confira os dados da sequência." }, { status: 400 });
   const existing = await prisma.storySequence.findFirst({ where: { id, workspaceId: context.workspaceId }, select: { id: true, instagramAccountId: true, status: true } });
   if (!existing) return NextResponse.json({ success: false, error: "Sequência não encontrada." }, { status: 404 });
