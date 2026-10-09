@@ -1,9 +1,49 @@
 import { prisma } from "@/lib/db/client";
-import { getInstagramStoryInsights, getLiveFacebookInstagramStories } from "@/lib/meta/client";
+import { getInstagramStoryInsights, getLiveInstagramStories, type MetaGraphHost } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { resolveStoryPublishingPage } from "@/lib/instagram-stories/page-link";
 import { filterExternalStories, needsMetricsRefresh } from "@/lib/instagram-stories/external";
 import { downloadStoryMedia, purgeExpiredExternalStoryMedia } from "@/lib/instagram-stories/external-media";
+
+type StoryCredential = { accessToken: string; host: MetaGraphHost };
+
+/**
+ * Tokens that can read the account's Stories, best first: the account's own
+ * token (Instagram Login needs no Facebook Page), then the linked Page's.
+ */
+async function storyCredentials(account: {
+  id: string;
+  workspaceId: string;
+  accessToken: string;
+  authProvider: string;
+  provider: string;
+}): Promise<StoryCredential[]> {
+  const credentials: StoryCredential[] = [];
+  if (account.provider === "META") {
+    credentials.push({
+      accessToken: decryptToken(account.accessToken),
+      host: account.authProvider === "INSTAGRAM_LOGIN" ? "instagram" : "facebook",
+    });
+  }
+  const page = await resolveStoryPublishingPage(account.workspaceId, account.id);
+  if (page) credentials.push({ accessToken: decryptToken(page.accessToken), host: "facebook" });
+  return credentials;
+}
+
+/** Live Stories through the first credential Meta accepts. */
+async function fetchLiveStories(credentials: StoryCredential[], instagramId: string) {
+  let lastError: unknown = null;
+  for (const credential of credentials) {
+    try {
+      const live = await getLiveInstagramStories(credential.accessToken, instagramId, credential.host);
+      return { live, credential };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError) throw lastError;
+  return null;
+}
 
 /**
  * Save Stories posted straight from the Instagram app while Meta still returns
@@ -12,17 +52,22 @@ import { downloadStoryMedia, purgeExpiredExternalStoryMedia } from "@/lib/instag
  */
 export async function captureExternalStories(): Promise<void> {
   const accounts = await prisma.instagramAccount.findMany({
-    select: { id: true, workspaceId: true, instagramId: true, username: true },
+    select: {
+      id: true,
+      workspaceId: true,
+      instagramId: true,
+      username: true,
+      accessToken: true,
+      authProvider: true,
+      provider: true,
+    },
   });
 
   for (const account of accounts) {
     try {
-      const page = await resolveStoryPublishingPage(account.workspaceId, account.id);
-      if (!page) continue;
-      const accessToken = decryptToken(page.accessToken);
-
-      const live = await getLiveFacebookInstagramStories(accessToken, account.instagramId);
-      if (live.length === 0) continue;
+      const fetched = await fetchLiveStories(await storyCredentials(account), account.instagramId);
+      if (!fetched || fetched.live.length === 0) continue;
+      const { live, credential } = fetched;
 
       const fisgaSlides = await prisma.storySlide.findMany({
         where: { instagramMediaId: { in: live.map((story) => story.id) } },
@@ -73,7 +118,7 @@ export async function captureExternalStories(): Promise<void> {
         if (!needsMetricsRefresh(saved.metrics[0]?.capturedAt)) continue;
 
         try {
-          const insights = await getInstagramStoryInsights(accessToken, story.id);
+          const insights = await getInstagramStoryInsights(credential.accessToken, story.id, credential.host);
           await prisma.externalStoryMetricSnapshot.create({
             data: {
               externalStoryId: saved.id,

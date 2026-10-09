@@ -11,7 +11,7 @@ import {
   type ExternalStoryExportRow,
 } from "@/lib/instagram-stories/external";
 import { getMediaStoragePath } from "@/lib/media-assets";
-import { getLiveFacebookInstagramStories } from "@/lib/meta/client";
+import { getLiveFacebookInstagramStories, getLiveInstagramStories } from "@/lib/meta/client";
 
 describe("filterExternalStories", () => {
   const live = [
@@ -159,5 +159,21 @@ describe("getLiveFacebookInstagramStories", () => {
     const url = new URL(fetchMock.mock.calls[0][0] as string);
     expect(url.pathname).toContain("/ig-user/stories");
     expect(url.searchParams.get("fields")).toBe("id,media_type,timestamp,media_url,permalink,caption");
+  });
+
+  it("reads Stories with an Instagram Login token from the Instagram host, no Page needed", async () => {
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ data: [{ id: "s1", timestamp: "2026-10-09T10:00:00+0000" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await getLiveInstagramStories("ig-token", "ig-user", "instagram");
+    await getLiveInstagramStories("page-token", "ig-user", "facebook");
+
+    expect(new URL(fetchMock.mock.calls[0][0] as string).host).toContain("graph.instagram.com");
+    expect(new URL(fetchMock.mock.calls[1][0] as string).host).toContain("graph.facebook.com");
   });
 });

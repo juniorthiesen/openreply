@@ -132,7 +132,7 @@ export default function ExternalStories() {
         <div className="rounded-2xl border border-dashed border-border bg-surface p-8 text-center">
           <h2 className="font-display text-lg font-bold text-foreground">Ainda não há Stories capturados</h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-muted">
-            A captura roda a cada 15 minutos e só vale para Stories postados a partir de agora, em contas com a Página do Facebook vinculada. Os Stories antigos que já expiraram não podem ser recuperados.
+            A captura roda a cada 15 minutos e só vale para Stories postados a partir de agora. Os Stories antigos que já expiraram não podem ser recuperados.
           </p>
         </div>
       ) : (

@@ -794,17 +794,40 @@ export interface InstagramLiveStory extends InstagramStoryMedia {
 }
 
 /** Like getActiveFacebookInstagramStories, with the fields worth keeping once the Story expires. */
-export async function getLiveFacebookInstagramStories(
+/**
+ * Which Graph host a token belongs to: a Facebook Login (Page) token goes to
+ * graph.facebook.com, an Instagram Login token to graph.instagram.com.
+ */
+export type MetaGraphHost = "facebook" | "instagram";
+
+function graphBase(host: MetaGraphHost): string {
+  return host === "instagram" ? instagramGraphBase() : facebookGraphBase();
+}
+
+/**
+ * The account's live Stories with the fields worth keeping once they expire.
+ * Works with an Instagram Login token (no Facebook Page needed) as well as with
+ * a Page token.
+ */
+export async function getLiveInstagramStories(
   accessToken: string,
-  instagramAccountId: string
+  instagramAccountId: string,
+  host: MetaGraphHost
 ): Promise<InstagramLiveStory[]> {
-  const url = new URL(`${facebookGraphBase()}/${instagramAccountId}/stories`);
+  const url = new URL(`${graphBase(host)}/${instagramAccountId}/stories`);
   url.searchParams.set("fields", "id,media_type,timestamp,media_url,permalink,caption");
   url.searchParams.set("limit", "100");
   url.searchParams.set("access_token", accessToken);
   const response = await fetch(url.toString());
   const data = await handleResponse<{ data: InstagramLiveStory[] }>(response);
   return data.data ?? [];
+}
+
+export async function getLiveFacebookInstagramStories(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<InstagramLiveStory[]> {
+  return getLiveInstagramStories(accessToken, instagramAccountId, "facebook");
 }
 
 /**
@@ -1088,7 +1111,8 @@ function firstInsightValue(entry: {
 /** Fetch Story metrics. Navigation is requested separately because Meta requires its breakdown. */
 export async function getInstagramStoryInsights(
   accessToken: string,
-  storyMediaId: string
+  storyMediaId: string,
+  host: MetaGraphHost = "facebook"
 ): Promise<InstagramStoryInsights> {
   const metrics = [
     "reach",
@@ -1099,7 +1123,7 @@ export async function getInstagramStoryInsights(
     "profile_visits",
     "total_interactions",
   ];
-  const summaryUrl = new URL(`${facebookGraphBase()}/${storyMediaId}/insights`);
+  const summaryUrl = new URL(`${graphBase(host)}/${storyMediaId}/insights`);
   summaryUrl.searchParams.set("metric", metrics.join(","));
   summaryUrl.searchParams.set("access_token", accessToken);
 
@@ -1120,25 +1144,31 @@ export async function getInstagramStoryInsights(
     }
   }
 
-  const navigationUrl = new URL(`${facebookGraphBase()}/${storyMediaId}/insights`);
-  navigationUrl.searchParams.set("metric", "navigation");
-  navigationUrl.searchParams.set("breakdown", "story_navigation_action_type");
-  navigationUrl.searchParams.set("access_token", accessToken);
-  const navigationResponse = await fetch(navigationUrl.toString());
-  const navigation = await handleResponse<{
-    data: Array<{
-      name: string;
-      values?: Array<{ value?: number | Record<string, number> }>;
-      total_value?: { value?: number | Record<string, number> };
-    }>;
-  }>(navigationResponse);
-  const navigationValue = firstInsightValue(
-    navigation.data.find((entry) => entry.name === "navigation") ?? {}
-  );
-  if (navigationValue && typeof navigationValue === "object") {
-    result.navigation = Object.fromEntries(
-      Object.entries(navigationValue).map(([key, value]) => [key.toLowerCase(), value])
+  try {
+    const navigationUrl = new URL(`${graphBase(host)}/${storyMediaId}/insights`);
+    navigationUrl.searchParams.set("metric", "navigation");
+    navigationUrl.searchParams.set("breakdown", "story_navigation_action_type");
+    navigationUrl.searchParams.set("access_token", accessToken);
+    const navigationResponse = await fetch(navigationUrl.toString());
+    const navigation = await handleResponse<{
+      data: Array<{
+        name: string;
+        values?: Array<{ value?: number | Record<string, number> }>;
+        total_value?: { value?: number | Record<string, number> };
+      }>;
+    }>(navigationResponse);
+    const navigationValue = firstInsightValue(
+      navigation.data.find((entry) => entry.name === "navigation") ?? {}
     );
+    if (navigationValue && typeof navigationValue === "object") {
+      result.navigation = Object.fromEntries(
+        Object.entries(navigationValue).map(([key, value]) => [key.toLowerCase(), value])
+      );
+    }
+  } catch (error) {
+    // Publishing already needs the breakdown to work, so a failure still surfaces
+    // there. An Instagram Login token may not offer it: keep the other metrics.
+    if (host === "facebook") throw error;
   }
 
   return result;
