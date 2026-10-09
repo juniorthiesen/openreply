@@ -69,6 +69,24 @@ export default function PrivacyPage() {
             de desempenho.
           </li>
           <li>
+            <strong>Stories postados fora da {LEGAL.brand}</strong>: enquanto um
+            Story seu está no ar, guardamos a legenda, o link, a data, as
+            métricas e uma cópia da imagem ou do vídeo, para que você possa
+            consultá-los depois que a Meta deixar de entregá-los.
+          </li>
+          <li>
+            <strong>Assistente de inteligência artificial</strong> (opcional):
+            quando você pede um rascunho de campanha ou variações de uma
+            resposta, o texto que você mesmo escreveu é enviado ao serviço de
+            inteligência artificial que você configurou nas Configurações ou,
+            se não houver um, ao serviço padrão da {LEGAL.brand}, só para gerar
+            a sugestão. Esses serviços podem repassar o pedido a outros
+            provedores de modelos. Não enviamos comentários, mensagens, nomes ou
+            identificadores de seguidores. A chave de acesso que você cadastra
+            fica guardada criptografada e é apagada quando você remove a
+            configuração.
+          </li>
+          <li>
             <strong>Páginas do Facebook</strong> (opcional): nome, ID e token da
             Página que você escolher conectar, para recursos que dependem da
             Página vinculada ao Instagram.
@@ -164,6 +182,18 @@ export default function PrivacyPage() {
             Campanhas, registros de envio, conversas exibidas e métricas de uma
             conta do Instagram: apagados junto com a conta, quando você a
             desconecta.
+          </li>
+          <li>
+            Cópia da imagem ou do vídeo de Stories postados fora da{" "}
+            {LEGAL.brand}: apagada 7 dias depois de ser guardada. A legenda, o
+            link, a data e as métricas continuam salvos até você desconectar a
+            conta.
+          </li>
+          <li>
+            Pedidos ao assistente de inteligência artificial: guardamos apenas a
+            data, o tipo de pedido, o modelo usado e a quantidade de texto
+            processada, para controlar o limite mensal. O texto do pedido e da
+            resposta não é guardado por nós.
           </li>
           <li>
             Demais dados do espaço de trabalho: enquanto você usar o serviço, e
