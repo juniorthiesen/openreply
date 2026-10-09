@@ -71,6 +71,74 @@ export function isManualTokenLoginEnabled(): boolean {
   return process.env.INSTAGRAM_MANUAL_TOKEN_ENABLED === "true";
 }
 
+/**
+ * The pricing section on the public home page promises limits the app does not
+ * enforce yet, and a reviewer compares the site against what the app does. It
+ * stays hidden during Meta review unless explicitly enabled.
+ */
+export function isLandingPricingEnabled(): boolean {
+  return process.env.LANDING_PRICING_ENABLED === "true";
+}
+
+export interface AiConfig {
+  /** Base URL of an OpenAI-compatible API, without a trailing slash (for example https://host/v1). */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** Models to try, in order, when the main one fails. */
+  fallbackModels: string[];
+  /** Generations a workspace may request per calendar month. */
+  monthlyLimit: number;
+}
+
+const MAX_FALLBACK_MODELS = 3;
+
+/** Split a typed list of model names (commas, semicolons or line breaks) into at most three distinct names. */
+export function parseModelList(raw: string | null | undefined, limit: number = MAX_FALLBACK_MODELS): string[] {
+  if (!raw) return [];
+  const names = raw
+    .split(/[\n,;]+/)
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0 && name.length <= 100);
+  return [...new Set(names)].slice(0, limit);
+}
+
+/** Reserve models from typed text: the main model is dropped first, so it never takes one of the three places. */
+export function parseReserveModels(raw: string | null | undefined, mainModel: string): string[] {
+  return parseModelList(raw, 50)
+    .filter((name) => name !== mainModel)
+    .slice(0, MAX_FALLBACK_MODELS);
+}
+
+const DEFAULT_AI_MONTHLY_LIMIT = 200;
+
+/** Generations a workspace may request per calendar month, whichever way the AI is configured. */
+export function getAiMonthlyLimit(): number {
+  const limit = Math.floor(Number(process.env.AI_MONTHLY_LIMIT));
+  return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_AI_MONTHLY_LIMIT;
+}
+
+/**
+ * Connection data for the AI assistant. Returns null (feature off) unless the
+ * flag is "true" and the endpoint, key and model are all set, so a missing value
+ * can never leave half of the feature running. Server-side only: the key is
+ * never sent to the browser.
+ */
+export function getAiConfig(): AiConfig | null {
+  if (process.env.AI_FEATURES_ENABLED !== "true") return null;
+  const baseUrl = process.env.AI_API_BASE_URL?.trim().replace(/\/+$/, "");
+  const apiKey = process.env.AI_API_KEY?.trim();
+  const model = process.env.AI_MODEL?.trim();
+  if (!baseUrl || !apiKey || !model) return null;
+
+  const fallbackModels = parseReserveModels(process.env.AI_FALLBACK_MODELS, model);
+  return { baseUrl, apiKey, model, fallbackModels, monthlyLimit: getAiMonthlyLimit() };
+}
+
+export function isAiEnabled(): boolean {
+  return getAiConfig() !== null;
+}
+
 export function getMetaGraphApiVersion(): string {
   return process.env.META_GRAPH_API_VERSION ?? "v25.0";
 }

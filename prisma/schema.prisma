@@ -90,6 +90,9 @@ model Workspace {
   mediaAssets       MediaAsset[]
   scheduledPosts    ScheduledPost[]
   storySequences    StorySequence[]
+  externalStories   ExternalStory[]
+  aiGenerations     AiGeneration[]
+  aiConnection      AiConnection?
 
   @@index([ownerId])
 }
@@ -158,6 +161,7 @@ model InstagramAccount {
   mediaAssets MediaAsset[]
   scheduledPosts ScheduledPost[]
   storySequences StorySequence[]
+  externalStories ExternalStory[]
 
   @@index([workspaceId])
 }
@@ -294,6 +298,7 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  abTests          AbTest[]
   scheduledPost    ScheduledPost?
   storySequence    StorySequence?   @relation(fields: [storySequenceId], references: [id], onDelete: SetNull)
 
@@ -424,6 +429,131 @@ model StoryMetricSnapshot {
   @@index([storySlideId, capturedAt])
 }
 
+/// A Story posted outside Fisga (straight from the Instagram app), seen while
+/// it was still live. Instagram stops returning a Story after 24 hours, so this
+/// keeps what the capture job could read while it was available.
+model ExternalStory {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  instagramMediaId   String   @unique
+  mediaType          String?
+  caption            String?  @db.Text
+  permalink          String?
+  mediaUrl           String?  @db.Text
+  // Local copy of the Story media, kept for a few days after capture (see
+  // EXTERNAL_STORY_MEDIA_RETENTION_DAYS) because Instagram stops serving it.
+  mediaStorageKey    String?
+  mediaContentType   String?
+  mediaByteSize      Int?
+  mediaStoredAt      DateTime?
+  mediaPurgedAt      DateTime?
+  postedAt           DateTime
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+
+  workspace        Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount              @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  metrics          ExternalStoryMetricSnapshot[]
+
+  @@index([workspaceId, postedAt])
+  @@index([instagramAccountId, postedAt])
+}
+
+model ExternalStoryMetricSnapshot {
+  id                String   @id @default(cuid())
+  externalStoryId   String
+  capturedAt        DateTime @default(now())
+  reach             Int?
+  views             Int?
+  replies           Int?
+  shares            Int?
+  follows           Int?
+  profileVisits     Int?
+  totalInteractions Int?
+  navigation        Json?
+
+  externalStory ExternalStory @relation(fields: [externalStoryId], references: [id], onDelete: Cascade)
+
+  @@index([externalStoryId, capturedAt])
+}
+
+/// One AI assistant request, kept only to enforce the monthly limit and to see
+/// usage. The text of the request and of the answer is never stored.
+model AiGeneration {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  userId       String
+  kind         String
+  model        String
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+/// A workspace's own AI endpoint (any OpenAI-compatible API), set from Settings.
+/// The key is encrypted at rest and never sent back to the browser. A workspace
+/// without a row falls back to the AI_* environment variables.
+model AiConnection {
+  id              String   @id @default(cuid())
+  workspaceId     String   @unique
+  baseUrl         String
+  apiKeyEncrypted String   @db.Text
+  model           String
+  // Comma-separated model names to try, in order, when the main model fails.
+  fallbackModels  String?
+  enabled         Boolean  @default(true)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+enum AbTestStatus {
+  RUNNING
+  ENDED
+}
+
+/// An A/B test of the link DM of one campaign. Variant A is the campaign as it
+/// was when the test started, variant B is the change being tried. Each
+/// variant has its own tracked link so its clicks are counted on their own.
+/// While a test is RUNNING the worker sends each person one variant, picked
+/// by a stable hash of the test and the person.
+model AbTest {
+  id           String       @id @default(cuid())
+  automationId String
+  status       AbTestStatus @default(RUNNING)
+  /// Percent of people who get variant A. Variant B gets the rest.
+  weightA      Int          @default(50)
+  /// "A" or "B" when a winner was picked, null when it ended without one.
+  winnerKey    String?
+  startedAt    DateTime     @default(now())
+  endedAt      DateTime?
+
+  aDmMessage       String  @db.Text
+  aLinkButtonLabel String?
+  /// The address as typed, without the UTM parameters the tracked link adds.
+  aDestinationUrl  String?
+  aTrackedLinkId   String? @unique
+
+  bDmMessage       String  @db.Text
+  bLinkButtonLabel String?
+  bDestinationUrl  String?
+  bTrackedLinkId   String? @unique
+
+  automation   Automation   @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  aTrackedLink TrackedLink? @relation("AbTestVariantA", fields: [aTrackedLinkId], references: [id], onDelete: SetNull)
+  bTrackedLink TrackedLink? @relation("AbTestVariantB", fields: [bTrackedLinkId], references: [id], onDelete: SetNull)
+  dmLogs       DmLog[]
+
+  @@index([automationId, status])
+}
+
 model DmLog {
   id                 String     @id @default(cuid())
   workspaceId        String
@@ -449,6 +579,9 @@ model DmLog {
   publicReplyError  String?
   // Instagram media id of the Story this DM replied to, when it was one.
   storyMediaId      String?
+  // The A/B test this person was part of and the variant they were sent.
+  abTestId          String?
+  abVariantKey      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -456,7 +589,9 @@ model DmLog {
   workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  abTest           AbTest?          @relation(fields: [abTestId], references: [id], onDelete: SetNull)
 
+  @@index([abTestId, abVariantKey])
   @@unique([automationId, commentId])
   @@index([workspaceId])
   @@index([automationId])
@@ -496,6 +631,11 @@ model TrackedLink {
   workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automation Automation  @relation(fields: [automationId], references: [id], onDelete: Cascade)
   clicks     LinkClick[]
+  // Set when this link belongs to an A/B test variant. Such links are not
+  // buttons of the campaign itself: read the campaign's own links with
+  // NOT_AB_VARIANT_LINK (lib/ab/link-filter.ts).
+  abTestAsA  AbTest?     @relation("AbTestVariantA")
+  abTestAsB  AbTest?     @relation("AbTestVariantB")
 
   @@index([workspaceId])
   @@index([automationId])
