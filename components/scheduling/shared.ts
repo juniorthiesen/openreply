@@ -85,7 +85,7 @@ export async function apiRequest<T>(
     | { success: boolean; data?: T; error?: string }
     | null;
   if (!response.ok || !payload?.success || payload.data === undefined) {
-    throw new Error(payload?.error || "Não foi possível concluir a solicitação.");
+    throw new Error(payload?.error || `Não foi possível concluir a solicitação (HTTP ${response.status}).`);
   }
   return payload.data;
 }

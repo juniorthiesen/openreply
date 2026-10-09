@@ -5,6 +5,7 @@ import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import { FacebookConnectNotice } from "@/components/facebook-connect-notice";
 import { InstagramManualTokenForm } from "@/components/instagram-manual-token-form";
+import AiConnectionSettings from "@/components/ai/ai-connection-settings";
 
 interface SettingsData {
   workspace: {
@@ -417,6 +418,8 @@ export default function SettingsPage() {
           </form>
         )}
       </section>
+
+      <AiConnectionSettings />
 
       <section className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">Uso</h2>

@@ -18,6 +18,9 @@ import InterfaceIcon from "@/components/interface-icon";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import CampaignAiAssistant from "@/components/ai/campaign-ai-assistant";
+import ReplyVariationsButton from "@/components/ai/reply-variations-button";
+import type { CampaignDraft } from "@/lib/ai/campaign-draft";
 import { readCache, writeCache } from "@/lib/client-cache";
 import {
   IMPORT_QUEUE_KEY,
@@ -395,6 +398,26 @@ export default function CampaignBuilder({
     setDmMessage((cur) => (cur.includes("{link}") ? cur : `${cur.trim()} {link}`.trim()));
   }
 
+  // Fill the form from an AI draft. Nothing is saved: the person reviews and saves.
+  function applyAiDraft(draft: CampaignDraft) {
+    setName(draft.name);
+    setMatchMode("specific");
+    setKeywordText(draft.keywords.join(", "));
+    setDmMessage(draft.linkUrl && !draft.dmMessage.includes("{link}") ? `${draft.dmMessage} {link}` : draft.dmMessage);
+    if (draft.linkUrl) {
+      setTrackedDestinationUrl(draft.linkUrl);
+      setLinkOpen(true);
+    }
+    if (draft.publicReplyMessages.length > 0) {
+      setPublicReplyEnabled(true);
+      setPublicReplyMessages(draft.publicReplyMessages.slice(0, 10));
+    }
+    if (draft.followUpMessage) {
+      setFollowUpEnabled(true);
+      setFollowUpMessage(draft.followUpMessage);
+    }
+  }
+
   async function handleSubmit(activeValue: boolean) {
     setError(null);
 
@@ -583,6 +606,8 @@ export default function CampaignBuilder({
           </span>
         </div>
       )}
+
+      {mode === "new" && <CampaignAiAssistant onApply={applyAiDraft} />}
 
       {/* Top bar */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -805,15 +830,29 @@ export default function CampaignBuilder({
                 </p>
               )}
               {publicReplyMessages.length < 10 && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPublicReplyMessages((prev) => [...prev, ""])
-                  }
-                  className="text-xs font-medium text-accent hover:underline"
-                >
-                  + Adicionar outra resposta
-                </button>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPublicReplyMessages((prev) => [...prev, ""])
+                    }
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    + Adicionar outra resposta
+                  </button>
+                  <ReplyVariationsButton
+                    baseMessage={publicReplyMessages.find((message) => message.trim()) ?? ""}
+                    room={10 - publicReplyMessages.filter((message) => message.trim()).length}
+                    onAdd={(variations) =>
+                      setPublicReplyMessages((prev) => {
+                        const kept = prev.filter((message) => message.trim());
+                        const known = new Set(kept.map((message) => message.trim().toLowerCase()));
+                        const added = variations.filter((variation) => !known.has(variation.trim().toLowerCase()));
+                        return [...kept, ...added].slice(0, 10);
+                      })
+                    }
+                  />
+                </div>
               )}
               <p className="text-xs text-muted">
                 Uma resposta é escolhida aleatoriamente a cada vez, evitando
