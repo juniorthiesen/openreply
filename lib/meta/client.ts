@@ -787,6 +787,26 @@ export async function getActiveFacebookInstagramStories(
   return data.data ?? [];
 }
 
+export interface InstagramLiveStory extends InstagramStoryMedia {
+  media_url?: string;
+  permalink?: string;
+  caption?: string;
+}
+
+/** Like getActiveFacebookInstagramStories, with the fields worth keeping once the Story expires. */
+export async function getLiveFacebookInstagramStories(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<InstagramLiveStory[]> {
+  const url = new URL(`${facebookGraphBase()}/${instagramAccountId}/stories`);
+  url.searchParams.set("fields", "id,media_type,timestamp,media_url,permalink,caption");
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("access_token", accessToken);
+  const response = await fetch(url.toString());
+  const data = await handleResponse<{ data: InstagramLiveStory[] }>(response);
+  return data.data ?? [];
+}
+
 /**
  * Fetch media by following pagination cursors until `max` items are collected
  * or there are no more pages. Pass a large `max` for an "all time" view; the

@@ -4,6 +4,7 @@ import { syncScheduledPostsWithQueue } from "@/lib/queue/scheduled-posts";
 import { createStorySequenceWorker } from "@/lib/queue/story-sequence-worker";
 import { syncStorySequencesWithQueue } from "@/lib/queue/story-sequences";
 import { captureRecentStoryInsights } from "@/lib/queue/story-insights";
+import { captureExternalStories } from "@/lib/queue/external-story-capture";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import { attachPendingNextReels } from "@/lib/automation/attach-next-reel";
@@ -46,6 +47,11 @@ async function pollStoryInsights() {
   catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[DM Worker] Story insights polling failed:", message);
+  }
+  try { await captureExternalStories(); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[DM Worker] External Stories capture failed:", message);
   }
 }
 

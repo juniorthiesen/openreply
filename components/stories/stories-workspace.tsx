@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- Story previews use the protected media URL returned by the API. */
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   apiRequest,
@@ -295,6 +296,7 @@ export default function StoriesWorkspace() {
           <p className="text-xs font-medium text-muted">FISGA / Publicação</p>
           <h1 className="mt-1 font-display text-3xl font-bold tracking-tight text-foreground">Stories</h1>
           <p className="mt-2 max-w-2xl text-sm text-muted">Monte sequências, programe cada quadro e acompanhe os resultados enquanto as métricas estiverem disponíveis no Instagram.</p>
+          <Link href="/stories/externos" className="mt-3 inline-flex text-sm font-semibold text-accent hover:underline">Ver Stories postados fora do Fisga →</Link>
         </div>
         <div className="flex items-center gap-3">
           <label className="sr-only" htmlFor="story-account">Conta do Instagram</label>
