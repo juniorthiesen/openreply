@@ -1,4 +1,5 @@
 import type { Prisma } from "@/app/generated/prisma/client";
+import { NOT_AB_VARIANT_LINK } from "@/lib/ab/link-filter";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 
@@ -88,7 +89,7 @@ export async function syncCampaignLinks(
   if (!primaryChanged && !secondaryChanged) return;
 
   const [primary, secondary, ...rest] = await tx.trackedLink.findMany({
-    where: { automationId },
+    where: { automationId, ...NOT_AB_VARIANT_LINK },
     orderBy: TRACKED_LINK_ORDER,
     select: { id: true, position: true },
   });

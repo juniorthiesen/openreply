@@ -200,7 +200,10 @@ describe("duplicateCampaign", () => {
 
     expect(mockPrisma.automation.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        include: { trackedLinks: { orderBy: TRACKED_LINK_ORDER } },
+        // A copy starts without the links of an A/B test variant.
+        include: {
+          trackedLinks: { where: { abTestAsA: null, abTestAsB: null }, orderBy: TRACKED_LINK_ORDER },
+        },
       })
     );
   });

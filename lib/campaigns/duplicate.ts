@@ -1,3 +1,4 @@
+import { NOT_AB_VARIANT_LINK } from "@/lib/ab/link-filter";
 import { prisma } from "@/lib/db/client";
 import { generateReportShareSlug } from "@/lib/reports/share";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
@@ -43,7 +44,8 @@ export async function duplicateCampaign({
 }) {
   const source = await prisma.automation.findFirst({
     where: { id: automationId, workspaceId },
-    include: { trackedLinks: { orderBy: TRACKED_LINK_ORDER } },
+    // A/B test links belong to the test, not to the campaign: a copy starts without them.
+    include: { trackedLinks: { where: NOT_AB_VARIANT_LINK, orderBy: TRACKED_LINK_ORDER } },
   });
 
   if (!source) return null;

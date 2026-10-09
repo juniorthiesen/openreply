@@ -141,6 +141,7 @@ import { MetaApiError, RateLimitError } from "@/lib/meta/client";
 import { createDMWorker } from "../lib/queue/dm-worker";
 import { getRedisConnection } from "@/lib/queue/client";
 import { hashRecipientId } from "@/lib/tracking/server";
+import { pickVariantKey } from "@/lib/ab/variants";
 
 const usagePeriodStart = new Date("2026-05-01T00:00:00.000Z");
 
@@ -171,6 +172,8 @@ const mockAutomation = {
     id: "workspace_123",
   },
   trackedLinks: [],
+  // Prisma always returns the running A/B test list; empty means no test.
+  abTests: [],
 };
 
 const mockJobData = {
@@ -337,6 +340,8 @@ describe("DM Worker — Full Pipeline", () => {
         instagramAccount: true,
         workspace: true,
         trackedLinks: {
+          // The links of an A/B test variant are not buttons of the campaign.
+          where: { abTestAsA: null, abTestAsB: null },
           select: {
             slug: true,
             label: true,
@@ -345,6 +350,14 @@ describe("DM Worker — Full Pipeline", () => {
           // Button order: position first, with createdAt and id only as
           // tie breakers, so tied rows can never come back swapped.
           orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        },
+        abTests: {
+          where: { status: "RUNNING" },
+          take: 1,
+          include: {
+            aTrackedLink: { select: { slug: true, label: true, destinationUrl: true } },
+            bTrackedLink: { select: { slug: true, label: true, destinationUrl: true } },
+          },
         },
       },
       orderBy: { createdAt: "asc" },
@@ -1763,4 +1776,133 @@ it("retains the public reply claim if sending succeeded but its log write failed
   await process({ ...createMockJob(), id: "next-poll" });
   expect(sendCommentReply).toHaveBeenCalledTimes(1);
   expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+});
+
+describe("DM Worker — A/B test", () => {
+  const abTest = {
+    id: "ab_test_1",
+    weightA: 50,
+    aDmMessage: "Oi {username}, versão A: {link}",
+    aLinkButtonLabel: "Quero A",
+    aTrackedLink: { slug: "slugA", label: "Teste A/B: variante A", destinationUrl: "https://a.example" },
+    bDmMessage: "Oi {username}, versão B: {link}",
+    bLinkButtonLabel: "Quero B",
+    bTrackedLink: { slug: "slugB", label: "Teste A/B: variante B", destinationUrl: "https://b.example" },
+  };
+  const campaign = {
+    ...mockAutomation,
+    dmMessage: "Mensagem original {link}",
+    linkButtonLabel: "Botão original",
+    trackedLinks: [{ slug: "original", label: null, destinationUrl: "https://original.example" }],
+    abTests: [abTest],
+  };
+
+  /** A person the hash sends to the wanted variant. */
+  function personIn(key: "A" | "B"): string {
+    for (let i = 0; i < 1000; i++) {
+      const id = `person_${i}`;
+      if (pickVariantKey(abTest.id, id, abTest.weightA) === key) return id;
+    }
+    throw new Error("no person found");
+  }
+
+  beforeEach(() => {
+    mockPrisma.automation.findMany.mockResolvedValue([campaign]);
+  });
+
+  it.each([
+    ["A", "Oi commenter_user, versão A:", "Quero A", "slugA"],
+    ["B", "Oi commenter_user, versão B:", "Quero B", "slugB"],
+  ] as const)("sends variant %s to a person the hash puts there, and records it", async (key, text, button, slug) => {
+    const person = personIn(key);
+    await getProcessor()(createMockJob({ ...mockJobData, commenterId: person }));
+
+    expect(mockSendPrivateReplyWithLinkButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "comment_555",
+      text,
+      [{ title: button, url: `http://localhost:3000/r/${slug}?r=${hashRecipientId(person)}` }]
+    );
+    // Nothing of the campaign's own link goes out while the test runs.
+    expect(JSON.stringify(mockSendPrivateReplyWithLinkButton.mock.calls)).not.toContain("original");
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ abTestId: "ab_test_1", abVariantKey: key, status: "PENDING" }),
+      })
+    );
+  });
+
+  it("keeps the variant already logged for the person, even if the hash would say otherwise", async () => {
+    const person = personIn("A");
+    mockPrisma.dmLog.findUnique.mockResolvedValue({
+      status: "PENDING",
+      attempts: 0,
+      dmDeliveryUnconfirmed: false,
+      abTestId: "ab_test_1",
+      abVariantKey: "B",
+    });
+
+    await getProcessor()(createMockJob({ ...mockJobData, commenterId: person }));
+
+    expect(mockSendPrivateReplyWithLinkButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "comment_555",
+      "Oi commenter_user, versão B:",
+      [{ title: "Quero B", url: `http://localhost:3000/r/slugB?r=${hashRecipientId(person)}` }]
+    );
+  });
+
+  it("still sends the campaign as it is when no test is running, and records no variant", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([{ ...campaign, abTests: [] }]);
+
+    await getProcessor()(createMockJob());
+
+    expect(mockSendPrivateReplyWithLinkButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "comment_555",
+      "Mensagem original",
+      [{ title: "Botão original", url: `http://localhost:3000/r/original?r=${hashRecipientId(mockJobData.commenterId)}` }]
+    );
+    const created = mockPrisma.dmLog.upsert.mock.calls.map((call) => call[0].create);
+    expect(created.every((row) => !("abTestId" in row))).toBe(true);
+  });
+
+  it("gives a person who taps the reveal button the variant they were assigned", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(campaign);
+    mockPrisma.dmLog.findFirst.mockResolvedValue({
+      commenterName: "commenter_user",
+      abTestId: "ab_test_1",
+      abVariantKey: "B",
+    });
+
+    await getProcessor()(createMockPostbackJob({ instagramAccountId: "ig_456", userId: "commenter_999", payload: "reveal:auto_789" }));
+
+    expect(mockSendDirectMessageWithLinkButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "Oi commenter_user, versão B:",
+      [{ title: "Quero B", url: `http://localhost:3000/r/slugB?r=${hashRecipientId("commenter_999")}` }]
+    );
+  });
+
+  it("agrees with itself: the same person gets the same variant on the comment and on the tap", async () => {
+    const person = personIn("A");
+    mockPrisma.automation.findFirst.mockResolvedValue(campaign);
+    mockPrisma.dmLog.findFirst.mockResolvedValue(null); // no log: the hash decides again
+
+    await getProcessor()(createMockPostbackJob({ instagramAccountId: "ig_456", userId: person, payload: "reveal:auto_789" }));
+
+    expect(mockSendDirectMessageWithLinkButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      person,
+      // No earlier log, so no name to fill {username} with.
+      "Oi there, versão A:",
+      [{ title: "Quero A", url: `http://localhost:3000/r/slugA?r=${hashRecipientId(person)}` }]
+    );
+  });
 });

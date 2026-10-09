@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import AbTestPanel from "@/components/ab/ab-test-panel";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
 
 interface Campaign {
@@ -53,9 +54,11 @@ interface Campaign {
     clicks: number;
     ctr: number;
   };
+  /** Present (with one item) while an A/B test is running. */
+  abTests?: { id: string }[];
 }
 
-type Tab = "insights" | "preview";
+type Tab = "insights" | "preview" | "ab";
 
 export default function CampaignDetailPage() {
   const { t } = useI18n();
@@ -192,6 +195,15 @@ export default function CampaignDetailPage() {
           >
             {campaign.isActive ? t("LIVE") : t("Paused")}
           </span>
+          {campaign.abTests && campaign.abTests.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTab("ab")}
+              className="shrink-0 rounded bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent hover:bg-accent/15"
+            >
+              Teste A/B em andamento
+            </button>
+          )}
         </div>
 
         <Summary title={t("When someone comments on")}>
@@ -303,6 +315,9 @@ export default function CampaignDetailPage() {
             <TabButton active={tab === "preview"} onClick={() => setTab("preview")}>
               {t("Preview")}
             </TabButton>
+            <TabButton active={tab === "ab"} onClick={() => setTab("ab")}>
+              Teste A/B
+            </TabButton>
           </div>
           <div className="flex items-center gap-2">
             <Link
@@ -337,6 +352,8 @@ export default function CampaignDetailPage() {
             ))}
           </div>
         )}
+
+        {tab === "ab" && <AbTestPanel automationId={campaign.id} />}
 
         {tab === "preview" && (
           <div className="flex justify-center sm:justify-start">

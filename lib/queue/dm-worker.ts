@@ -52,6 +52,8 @@ import {
   renderMessageWithoutLink,
 } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
+import { NOT_AB_VARIANT_LINK, RUNNING_AB_TEST } from "@/lib/ab/link-filter";
+import { applyAbVariant, resolveVariantKey, type AbVariantKey } from "@/lib/ab/variants";
 import { hashRecipientId } from "@/lib/tracking/server";
 
 import { ZernioApiError } from "@/lib/zernio/client";
@@ -310,6 +312,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       instagramAccount: true,
       workspace: true,
       trackedLinks: {
+        where: NOT_AB_VARIANT_LINK,
         select: {
           slug: true,
           label: true,
@@ -317,11 +320,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         },
         orderBy: TRACKED_LINK_ORDER,
       },
+      abTests: RUNNING_AB_TEST,
     },
     orderBy: { createdAt: "asc" },
   });
 
-  for (const automation of automations) {
+  for (const baseAutomation of automations) {
+    // With an A/B test running, `automation` becomes the campaign as the
+    // person's variant would send it (see below); otherwise it is the campaign.
+    let automation = baseAutomation;
     // "Any word" campaigns fire on every comment; otherwise require a keyword hit.
     const matchResult = automation.matchAnyWord
       ? { matched: true, matchedKeyword: null }
@@ -350,6 +357,16 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         data: { dmDeliveryUnconfirmed: true },
       });
       existingLog.dmDeliveryUnconfirmed = true;
+    }
+
+    // A/B test: each person gets one variant for good, so the campaign is swapped
+    // for that variant's message, button and link and everything below sends it.
+    const abTest = baseAutomation.abTests[0] ?? null;
+    let abChoice: { testId: string; key: AbVariantKey } | null = null;
+    if (abTest) {
+      const key = resolveVariantKey(abTest, commenterId, existingLog);
+      automation = applyAbVariant(baseAutomation, abTest, key);
+      abChoice = { testId: abTest.id, key };
     }
 
     const alreadyDmd = existingLog?.status === "SENT";
@@ -439,8 +456,12 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         commenterId, commenterName, commentText, commentId,
         matchedKeyword: matchResult.matchedKeyword,
         status: "PENDING",
+        ...(abChoice ? { abTestId: abChoice.testId, abVariantKey: abChoice.key } : {}),
       },
-      update: {},
+      // A row an earlier failed attempt left without a variant still gets it, so the DM is counted.
+      update: abChoice && !existingLog?.abTestId
+        ? { abTestId: abChoice.testId, abVariantKey: abChoice.key }
+        : {},
     });
 
     // Public reply leg — decoupled from the DM and posted first so a DM failure
@@ -904,9 +925,11 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       instagramAccount: true,
       workspace: true,
       trackedLinks: {
+        where: NOT_AB_VARIANT_LINK,
         select: { slug: true, label: true, destinationUrl: true },
         orderBy: TRACKED_LINK_ORDER,
       },
+      abTests: RUNNING_AB_TEST,
     },
   });
 
@@ -941,9 +964,16 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   // Personalize {username} from the opening DM log for this user, if present.
   const openingLog = await prisma.dmLog.findFirst({
     where: { automationId: automation.id, commenterId: userId },
-    select: { commenterName: true },
+    select: { commenterName: true, abTestId: true, abVariantKey: true },
   });
   const commenterName = openingLog?.commenterName ?? null;
+
+  // The person gets the variant they were assigned when they first commented.
+  // Without a log the same hash gives the same answer, so it still agrees.
+  const postbackTest = automation.abTests[0] ?? null;
+  const revealAutomation = postbackTest
+    ? applyAbVariant(automation, postbackTest, resolveVariantKey(postbackTest, userId, openingLog))
+    : automation;
 
   let accessToken: InstagramContext;
   try {
@@ -1112,7 +1142,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       send: () =>
         sendRevealDirectMessage({
           accessToken: accessToken,
-          automation: automation,
+          automation: revealAutomation,
           userId: userId,
           commenterName: commenterName,
           context: "postback",
@@ -1325,9 +1355,11 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       instagramAccount: true,
       workspace: true,
       trackedLinks: {
+        where: NOT_AB_VARIANT_LINK,
         select: { slug: true, label: true, destinationUrl: true },
         orderBy: TRACKED_LINK_ORDER,
       },
+      abTests: RUNNING_AB_TEST,
     },
     orderBy: { createdAt: "asc" },
   });
@@ -1370,6 +1402,12 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       continue;
     }
 
+    // A/B test: the sender gets one variant, and the log records which.
+    const messageTest = automation.abTests[0] ?? null;
+    const messageVariantKey = messageTest ? resolveVariantKey(messageTest, senderId, existingLog) : null;
+    const revealAutomation =
+      messageTest && messageVariantKey ? applyAbVariant(automation, messageTest, messageVariantKey) : automation;
+
     const logBase = {
       workspaceId: automation.workspaceId,
       automationId: automation.id,
@@ -1379,6 +1417,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       commentId: dedupeId,
       matchedKeyword: matchResult.matchedKeyword,
       storyMediaId: replyToStoryId ?? null,
+      ...(messageTest && messageVariantKey
+        ? { abTestId: messageTest.id, abVariantKey: messageVariantKey }
+        : {}),
     };
 
     if (!hasInstagramCredentials(automation.instagramAccount)) {
@@ -1501,7 +1542,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       } else {
         await sendRevealDirectMessage({
           accessToken: accessToken,
-          automation: automation,
+          automation: revealAutomation,
           userId: senderId,
           commenterName: commenterName,
           context: "message trigger",

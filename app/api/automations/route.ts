@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { NOT_AB_VARIANT_LINK } from "@/lib/ab/link-filter";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import {
@@ -201,6 +202,8 @@ export async function GET(request: NextRequest) {
         select: { dmLogs: true },
       },
       trackedLinks: {
+        // The links of an A/B test variant are not buttons of the campaign.
+        where: NOT_AB_VARIANT_LINK,
         select: {
           id: true,
           slug: true,
@@ -210,6 +213,8 @@ export async function GET(request: NextRequest) {
         },
         orderBy: TRACKED_LINK_ORDER,
       },
+      // Lets the list tell that a test is running without a second request.
+      abTests: { where: { status: "RUNNING" }, select: { id: true }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -536,6 +541,38 @@ export async function PATCH(request: NextRequest) {
     secondaryButtonLabel,
     ...automationData
   } = parsed.data;
+
+  // While an A/B test runs, the worker sends the test's own variants, so a change
+  // to the link DM would reach nobody and the test's numbers would stop meaning
+  // what they say. Only a real change is refused, so saving anything else works.
+  const runningTest = await prisma.abTest.findFirst({
+    where: { automationId, status: "RUNNING" },
+    select: { id: true },
+  });
+  if (runningTest) {
+    const primaryLink = await prisma.trackedLink.findFirst({
+      where: { automationId, ...NOT_AB_VARIANT_LINK },
+      orderBy: TRACKED_LINK_ORDER,
+      select: { destinationUrl: true },
+    });
+    const changesLinkDm =
+      (automationData.dmMessage !== undefined && automationData.dmMessage !== existing.dmMessage) ||
+      (automationData.linkButtonLabel !== undefined &&
+        (automationData.linkButtonLabel ?? "") !== (existing.linkButtonLabel ?? "")) ||
+      (trackedDestinationUrl !== undefined &&
+        trackedDestinationUrl !== null &&
+        trackedDestinationUrl !== (primaryLink?.destinationUrl ?? ""));
+    if (changesLinkDm) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Há um teste A/B em andamento. Encerre o teste na aba Teste A/B antes de mudar a mensagem, o botão ou o link da DM.",
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   // Keep dependent fields consistent: any-word clears keywords; a disabled
   // opening DM clears its message and button.
