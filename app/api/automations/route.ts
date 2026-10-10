@@ -85,6 +85,8 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
+    // One Story whose replies this campaign answers (needs dmTriggerEnabled).
+    storyMediaId: z.string().min(1).max(100).optional().nullable(),
     dmMessage: z.string().min(1).max(1000),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -146,6 +148,7 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
+  storyMediaId: z.string().min(1).max(100).optional().nullable(),
   dmMessage: z.string().min(1).max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -408,6 +411,19 @@ export async function POST(request: NextRequest) {
     secondaryLabel: parsed.data.secondaryButtonLabel,
   });
 
+  if (parsed.data.dmTriggerEnabled && parsed.data.storyMediaId) {
+    const story = await prisma.externalStory.findFirst({
+      where: { workspaceId, instagramMediaId: parsed.data.storyMediaId },
+      select: { id: true },
+    });
+    if (!story) {
+      return NextResponse.json(
+        { success: false, error: "Esse Story não foi encontrado nos Stories capturados." },
+        { status: 400 }
+      );
+    }
+  }
+
   const { pendingNextReel, matchAnyPost, matchAnyWord, openingDmEnabled } =
     parsed.data;
   // A post is only stored for the "specific post" trigger.
@@ -434,6 +450,7 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
+      storyMediaId: parsed.data.dmTriggerEnabled ? parsed.data.storyMediaId || null : null,
       dmMessage: parsed.data.dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
@@ -570,6 +587,21 @@ export async function PATCH(request: NextRequest) {
             "Há um teste A/B em andamento. Encerre o teste na aba Teste A/B antes de mudar a mensagem, o botão ou o link da DM.",
         },
         { status: 409 }
+      );
+    }
+  }
+
+  // A Story only means something to a campaign that answers DMs.
+  if (automationData.dmTriggerEnabled === false) automationData.storyMediaId = null;
+  if (automationData.storyMediaId && automationData.storyMediaId !== existing.storyMediaId) {
+    const story = await prisma.externalStory.findFirst({
+      where: { workspaceId, instagramMediaId: automationData.storyMediaId },
+      select: { id: true },
+    });
+    if (!story) {
+      return NextResponse.json(
+        { success: false, error: "Esse Story não foi encontrado nos Stories capturados." },
+        { status: 400 }
       );
     }
   }

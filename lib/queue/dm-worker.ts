@@ -1318,13 +1318,25 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 export async function selectMessageCampaigns<
   T extends {
     storySequenceId: string | null;
+    storyMediaId?: string | null;
     matchAnyWord: boolean;
     keywords: string[];
     wholeWordMatch: boolean;
   },
 >(automations: T[], messageText: string, replyToStoryId?: string): Promise<T[]> {
-  const general = automations.filter((automation) => !automation.storySequenceId);
+  // A campaign pinned to a Story (or a sequence) never answers a DM that is not
+  // a reply to it.
+  const general = automations.filter((automation) => !automation.storySequenceId && !automation.storyMediaId);
   if (!replyToStoryId || general.length === automations.length) return general;
+
+  // A campaign pinned to the exact Story that was replied to answers alone.
+  const pinned = automations.filter(
+    (automation) =>
+      automation.storyMediaId === replyToStoryId &&
+      (automation.matchAnyWord ||
+        matchKeywords(messageText, automation.keywords, automation.wholeWordMatch).matched)
+  );
+  if (pinned.length > 0) return pinned;
 
   const slide = await prisma.storySlide.findUnique({
     where: { instagramMediaId: replyToStoryId },

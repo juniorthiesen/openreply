@@ -18,6 +18,7 @@ import InterfaceIcon from "@/components/interface-icon";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import StoryReplyPicker from "@/components/campaigns/story-reply-picker";
 import CampaignAiAssistant from "@/components/ai/campaign-ai-assistant";
 import ReplyVariationsButton from "@/components/ai/reply-variations-button";
 import type { CampaignDraft } from "@/lib/ai/campaign-draft";
@@ -41,6 +42,7 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyMediaId?: string | null;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -173,6 +175,7 @@ export default function CampaignBuilder({
   const [matchMode, setMatchMode] = useState<MatchMode>("specific");
   const [keywordText, setKeywordText] = useState("");
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
+  const [storyMediaId, setStoryMediaId] = useState<string | null>(null);
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
   const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
@@ -274,6 +277,7 @@ export default function CampaignBuilder({
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setStoryMediaId(c.storyMediaId ?? null);
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
           c.publicReplyMessages?.length
@@ -422,7 +426,9 @@ export default function CampaignBuilder({
     setError(null);
 
     if (!selectedAccountId) return setError("Conecte uma conta do Instagram antes de continuar.");
-    if (triggerScope === "specific" && !postId)
+    // A campaign pinned to a Story is triggered by the Story reply, not by a post.
+    const pinnedToStory = dmTriggerEnabled && Boolean(storyMediaId);
+    if (triggerScope === "specific" && !postId && !pinnedToStory)
       return setError("Escolha uma publicação ou reel para acionar a campanha.");
     if (matchMode === "specific" && keywords.length === 0)
       return setError("Adicione pelo menos uma palavra-chave ou use a opção para qualquer palavra.");
@@ -450,6 +456,7 @@ export default function CampaignBuilder({
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      storyMediaId: dmTriggerEnabled ? storyMediaId : null,
       dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
@@ -783,6 +790,13 @@ export default function CampaignBuilder({
                 ? "Toda DM para esta conta recebe a resposta abaixo — use com cuidado."
                 : "Uma DM com qualquer uma dessas palavras recebe a mesma resposta; não é necessário comentar."}
             </p>
+          )}
+          {dmTriggerEnabled && selectedAccountId && (
+            <StoryReplyPicker
+              instagramAccountId={selectedAccountId}
+              value={storyMediaId}
+              onChange={setStoryMediaId}
+            />
           )}
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">
