@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { BrandLogo, BrandMark } from "@/components/brand-logo";
 import { isLandingPricingEnabled } from "@/lib/env";
 import { PricingSection } from "@/components/landing/pricing-section";
+import { ProductTour } from "@/components/landing/product-tour";
 
 export type LandingVariant = "a" | "b";
 
@@ -46,9 +47,57 @@ const faqs = [
       "Sim. Você pode preparar publicações, carrosséis e lotes de conteúdo, revisar a prévia e organizar o calendário de publicação.",
   },
   {
+    question: "A Fisga cria a campanha por mim?",
+    answer:
+      "Ela monta um rascunho a partir de uma frase sua, com nome, palavras-chave, mensagem e respostas públicas. Você revisa e ajusta tudo antes de salvar e ativar.",
+  },
+  {
+    question: "Dá para testar duas mensagens?",
+    answer:
+      "Sim. No teste A/B você compara duas versões da DM com link, com mensagem, botão e link próprios, vê o resultado de cada uma e escolhe a vencedora para a campanha.",
+  },
+  {
+    question: "E os Stories que eu posto direto no Instagram?",
+    answer:
+      "A Fisga guarda os dados e as métricas deles enquanto estão no ar, porque depois de 24 horas a Meta deixa de entregá-los. A mídia fica salva por 7 dias, e você pode baixar tudo em CSV.",
+  },
+  {
     question: "Como começo a usar?",
     answer:
       "Entre com seu e-mail pelo link seguro enviado para sua caixa de entrada. Depois, conecte sua conta profissional do Instagram para configurar o espaço de trabalho.",
+  },
+];
+
+const newFeatures = [
+  {
+    tag: "Campanhas",
+    title: "Criar com IA",
+    text: "Descreva a campanha em uma frase e receba um rascunho com nome, palavras-chave, mensagem e respostas públicas. Você revisa antes de salvar.",
+  },
+  {
+    tag: "Campanhas",
+    title: "Teste A/B da DM",
+    text: "Compare duas versões da mensagem com link, cada uma com seu botão e seu link, e aplique a vencedora à campanha.",
+  },
+  {
+    tag: "Stories",
+    title: "Responder só a um Story",
+    text: "Escolha um dos seus Stories e envie a DM apenas para quem responder a ele com a palavra-chave da campanha.",
+  },
+  {
+    tag: "Stories",
+    title: "Stories de fora da Fisga",
+    text: "O que você posta direto no Instagram também é capturado, com alcance e respostas. A mídia fica salva por 7 dias, e você baixa os dados em CSV.",
+  },
+  {
+    tag: "Campanhas",
+    title: "Seguir antes de receber",
+    text: "Peça que a pessoa siga o perfil antes de receber o link e acompanhe cliques únicos por pessoa em cada campanha.",
+  },
+  {
+    tag: "Publicações",
+    title: "Posts em massa",
+    text: "Envie até 60 publicações de uma vez, distribua as datas, monte carrosséis por pasta e confira a grade antes de agendar.",
   },
 ];
 
@@ -64,6 +113,7 @@ export async function LandingPage({ variant = "a" }: { variant?: LandingVariant 
             <BrandLogo size={40} />
           </Link>
           <nav aria-label="Navegação principal" className="hidden items-center gap-8 md:flex">
+            <a className="text-sm text-[#595A5D] transition hover:text-[#C23E17]" href="#demo">Em ação</a>
             <a className="text-sm text-[#595A5D] transition hover:text-[#C23E17]" href="#como">Como funciona</a>
             <a className="text-sm text-[#595A5D] transition hover:text-[#C23E17]" href="#recursos">Recursos</a>
             {showPricing && <a className="text-sm text-[#595A5D] transition hover:text-[#C23E17]" href="#planos">Planos</a>}
@@ -96,8 +146,8 @@ export async function LandingPage({ variant = "a" }: { variant?: LandingVariant 
             <Link href={appUrl("/dashboard")} className="inline-flex min-h-14 items-center justify-center gap-3 rounded-full bg-[#C23E17] px-7 text-base font-bold text-white transition hover:bg-[#A93212] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C23E17]">
               Acessar a plataforma <ArrowUpRight />
             </Link>
-            <a href="#como" className="inline-flex min-h-14 items-center justify-center rounded-full border border-[#D5CFC3] bg-white/50 px-7 text-base font-semibold text-[#27292D] transition hover:border-[#C23E17] hover:bg-white">
-              Ver como funciona
+            <a href="#demo" className="inline-flex min-h-14 items-center justify-center rounded-full border border-[#D5CFC3] bg-white/50 px-7 text-base font-semibold text-[#27292D] transition hover:border-[#C23E17] hover:bg-white">
+              Ver a plataforma em ação
             </a>
           </div>
           <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-xs font-medium text-[#626267]">
@@ -172,7 +222,9 @@ export async function LandingPage({ variant = "a" }: { variant?: LandingVariant 
         </div>
       </section>
 
-      <section id="como" className="mx-auto max-w-[1320px] scroll-mt-24 px-5 py-24 sm:px-8 sm:py-32">
+      <ProductTour />
+
+      <section id="como" className="mx-auto max-w-[1320px] scroll-mt-24 px-5 py-24 sm:px-8 sm:py-32 sm:pt-0">
         <div className="max-w-[720px]">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#C23E17]">Como funciona</p>
           <h2 className="mt-4 font-display text-4xl font-bold leading-[1.08] tracking-[-0.055em] sm:text-6xl">Três passos para sua próxima conversa.</h2>
@@ -206,7 +258,7 @@ export async function LandingPage({ variant = "a" }: { variant?: LandingVariant 
               <div className="relative">
                 <span className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-white/70">Stories · publicar e analisar</span>
                 <h3 className="mt-8 max-w-lg font-display text-3xl font-bold tracking-[-0.04em] sm:text-4xl">Stories que você pode revisar, agendar e reaproveitar.</h3>
-                <p className="mt-4 max-w-lg text-sm leading-7 text-white/65">Organize sequências, acompanhe as métricas disponíveis e duplique uma sequência para editar antes de publicar de novo.</p>
+                <p className="mt-4 max-w-lg text-sm leading-7 text-white/65">Organize sequências com enquetes e respostas por palavra-chave, veja a prévia como no Instagram e acompanhe as métricas disponíveis. Os Stories postados direto no Instagram também ficam salvos.</p>
                 <div className="mt-9 flex items-end gap-2" aria-label="Prévia ilustrativa de uma sequência de Stories">
                   {["bg-[#BBA18B]", "bg-[#E1C9B5]", "bg-[#6D625B]", "bg-[#D8B39A]"].map((color, index) => (
                     <div key={index} className={`relative h-[118px] w-[67px] overflow-hidden rounded-[14px] border border-white/15 ${color} sm:h-[145px] sm:w-[82px]`}>
@@ -244,14 +296,35 @@ export async function LandingPage({ variant = "a" }: { variant?: LandingVariant 
             <article className="rounded-[28px] border border-[#F26B3A]/30 bg-[#C23E17] p-7 sm:p-9 lg:col-span-7">
               <span className="inline-flex rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/80">Campanhas · comentário para DM</span>
               <h3 className="mt-7 max-w-xl font-display text-3xl font-bold tracking-[-0.04em] sm:text-4xl">Respostas que começam onde o interesse aparece.</h3>
-              <p className="mt-4 max-w-xl text-sm leading-7 text-white/80">Crie campanhas para posts e Reels, configure palavras-chave e acompanhe comentários, respostas e links em um fluxo só.</p>
+              <p className="mt-4 max-w-xl text-sm leading-7 text-white/80">Crie campanhas para posts, Reels e Stories, configure palavras-chave e acompanhe comentários, respostas e links em um fluxo só. Comece com um rascunho feito pela IA e compare duas versões da mensagem.</p>
               <div className="mt-8 flex flex-wrap gap-2 text-xs font-semibold">
-                {["Palavras-chave", "Respostas privadas", "Links acompanhados", "Caixa de entrada"].map((label) => <span key={label} className="rounded-full border border-white/25 bg-white/10 px-3 py-2">{label}</span>)}
+                {["Criar com IA", "Teste A/B", "Responder a Stories", "Palavras-chave", "Exigir seguir", "Links acompanhados", "Caixa de entrada"].map((label) => <span key={label} className="rounded-full border border-white/25 bg-white/10 px-3 py-2">{label}</span>)}
               </div>
               <Link href={appUrl("/campaigns")} className="mt-8 inline-flex items-center gap-2 text-sm font-bold text-white underline decoration-white/40 underline-offset-4 transition hover:decoration-white">Conhecer campanhas <ArrowUpRight /></Link>
             </article>
           </div>
         </div>
+      </section>
+
+      <section id="novidades" className="mx-auto max-w-[1320px] scroll-mt-24 px-5 py-24 sm:px-8 sm:py-32">
+        <div className="max-w-[760px]">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#C23E17]">Novidades</p>
+          <h2 className="mt-4 font-display text-4xl font-bold leading-[1.08] tracking-[-0.055em] sm:text-6xl">Mais controle sobre cada conversa.</h2>
+          <p className="mt-5 max-w-xl text-base leading-7 text-[#626267] sm:text-lg">Recursos recentes para criar campanhas mais rápido, testar o que funciona e não perder nenhum Story.</p>
+        </div>
+        <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {newFeatures.map((feature) => (
+            <article key={feature.title} className="group flex min-h-[240px] flex-col rounded-[26px] border border-[#E2DDD1] bg-white p-7 transition hover:-translate-y-1 hover:shadow-[0_20px_45px_-35px_rgba(35,31,27,0.45)] sm:p-8">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#737378]">{feature.tag}</span>
+                <span className="rounded-full bg-[#FCE8DE] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#C23E17]">Novo</span>
+              </div>
+              <h3 className="mt-8 font-display text-2xl font-bold tracking-[-0.035em]">{feature.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-[#626267]">{feature.text}</p>
+            </article>
+          ))}
+        </div>
+        <p className="mt-6 text-xs text-[#8A8A8E]">Os recursos disponíveis variam conforme as permissões aprovadas pela Meta para a sua conta.</p>
       </section>
 
       <section className="mx-auto grid max-w-[1320px] gap-12 px-5 py-24 sm:px-8 sm:py-32 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
