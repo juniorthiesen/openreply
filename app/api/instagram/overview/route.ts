@@ -10,6 +10,7 @@ import {
 import {
   getAllUserMedia,
   getMediaInsights,
+  MetaApiError,
   PermissionError,
   type InstagramMedia,
 } from "@/lib/meta/client";
@@ -67,6 +68,8 @@ export interface OverviewPost {
   comments: number | null;
   saved: number | null;
   shares: number | null;
+  /** Accounts that started following from this post; null when Meta has no figure. */
+  follows: number | null;
   isTrialReel: boolean;
   trialInsightsAvailable: boolean | null;
   campaigns: ReturnType<typeof getCampaignsForOverviewPost>;
@@ -94,6 +97,7 @@ export interface OverviewResponse {
     comments: number;
     saved: number;
     shares: number;
+    follows: number;
     interactions: number;
   };
   posts: OverviewPost[];
@@ -198,13 +202,30 @@ export async function GET(request: NextRequest) {
         const metrics = isVideoLike(m.media)
           ? ["views", "reach", "saved", "shares", "total_interactions"]
           : ["reach", "saved", "shares", "total_interactions"];
+        // `follows` is not offered for every media type, and Meta rejects the
+        // whole request when one metric is invalid. Ask for it together with the
+        // rest (one call in the common case) and, only if that is refused, ask
+        // again without it so a post never loses its other numbers.
         try {
-          const data = await getMediaInsights(accessToken, m.media.id, metrics);
+          const data = await getMediaInsights(accessToken, m.media.id, [...metrics, "follows"]);
           insightsAvailable = true;
           return data;
-        } catch (err) {
-          if (err instanceof PermissionError) permissionDenied = true;
-          return null;
+        } catch (withFollowsError) {
+          // Token, rate-limit and quota problems hit the retry the same way.
+          if (
+            withFollowsError instanceof MetaApiError &&
+            [190, 368, 4, 17].includes(withFollowsError.code)
+          ) {
+            return null;
+          }
+          try {
+            const data = await getMediaInsights(accessToken, m.media.id, metrics);
+            insightsAvailable = true;
+            return data;
+          } catch (err) {
+            if (err instanceof PermissionError) permissionDenied = true;
+            return null;
+          }
         }
       }
     );
@@ -229,6 +250,7 @@ export async function GET(request: NextRequest) {
         comments,
         saved: ins?.saved ?? null,
         shares: ins?.shares ?? null,
+        follows: ins?.follows ?? null,
         isTrialReel,
         trialInsightsAvailable,
         campaigns: [],
@@ -269,6 +291,7 @@ export async function GET(request: NextRequest) {
         acc.comments += p.comments ?? 0;
         acc.saved += p.saved ?? 0;
         acc.shares += p.shares ?? 0;
+        acc.follows += p.follows ?? 0;
         acc.interactions += (p.likes ?? 0) + (p.comments ?? 0) + (p.saved ?? 0) + (p.shares ?? 0);
         return acc;
       },
@@ -280,6 +303,7 @@ export async function GET(request: NextRequest) {
         comments: 0,
         saved: 0,
         shares: 0,
+        follows: 0,
         interactions: 0,
       }
     );

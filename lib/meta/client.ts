@@ -108,6 +108,8 @@ export interface InstagramMediaInsights {
   comments?: number;
   saved?: number;
   shares?: number;
+  /** Accounts that started following from this media. Not offered for every media type. */
+  follows?: number;
   total_interactions?: number;
 }
 

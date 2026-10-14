@@ -13,7 +13,7 @@ import Link from "next/link";
 import AccountSelect from "@/components/account-select";
 import StatCard from "@/components/stat-card";
 import FollowerChart from "@/components/follower-chart";
-import type { OverviewResponse } from "@/app/api/instagram/overview/route";
+import type { OverviewPost, OverviewResponse } from "@/app/api/instagram/overview/route";
 
 function formatNumber(n: number | null): string {
   if (n === null) return "—";
@@ -25,6 +25,78 @@ function formatNumber(n: number | null): string {
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("pt-BR", { month: "short", day: "numeric" });
+}
+
+type SortKey =
+  | "views"
+  | "reach"
+  | "likes"
+  | "comments"
+  | "saved"
+  | "shares"
+  | "follows"
+  | "timestamp";
+type SortState = { key: SortKey; dir: "desc" | "asc" };
+
+// The order the table has before anyone sorts it: newest first.
+const DEFAULT_SORT: SortState = { key: "timestamp", dir: "desc" };
+
+/** The value a post is ranked by; null (no figure from Meta) always sorts last. */
+function sortValue(post: OverviewPost, key: SortKey): number | null {
+  return key === "timestamp" ? Date.parse(post.timestamp) : post[key];
+}
+
+function sortPosts(posts: OverviewPost[], sort: SortState): OverviewPost[] {
+  return [...posts].sort((a, b) => {
+    const left = sortValue(a, sort.key);
+    const right = sortValue(b, sort.key);
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return sort.dir === "desc" ? right - left : left - right;
+  });
+}
+
+/** Click: biggest first, again: smallest first, again: back to newest first. */
+function nextSort(current: SortState, key: SortKey): SortState {
+  if (current.key !== key) return { key, dir: "desc" };
+  if (current.dir === "desc") return { key, dir: "asc" };
+  return DEFAULT_SORT;
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  className: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      aria-sort={active ? (sort.dir === "desc" ? "descending" : "ascending") : "none"}
+      className={className}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center justify-end gap-0.5 uppercase tracking-wide transition-colors hover:text-foreground ${
+          active ? "text-foreground" : ""
+        }`}
+      >
+        {label}
+        <span aria-hidden="true" className="inline-block w-2.5 text-left">
+          {active ? (sort.dir === "desc" ? "↓" : "↑") : ""}
+        </span>
+      </button>
+    </th>
+  );
 }
 
 const COUNT_OPTIONS = [
@@ -42,6 +114,7 @@ export default function OverviewPage() {
   const [count, setCount] = useState("50");
   const [activatingCampaign, setActivatingCampaign] = useState<string | null>(null);
   const [campaignErrors, setCampaignErrors] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -158,6 +231,7 @@ export default function OverviewPage() {
 
   const { totals, posts, accounts, insightsAvailable, insightsPermissionDenied, followers, followerHistory } =
     data;
+  const sortedPosts = sortPosts(posts, sort);
 
   return (
     <div className="space-y-8">
@@ -257,33 +331,35 @@ export default function OverviewPage() {
           <p className="text-sm text-muted py-8 text-center">Nenhuma publicação encontrada</p>
         ) : (
           <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[960px] table-fixed text-sm xl:min-w-0">
+            <table className="w-full min-w-[1040px] table-fixed text-sm xl:min-w-0">
               <colgroup>
-                <col className="w-[26%]" />
+                <col className="w-[21%]" />
                 <col className="w-[9%]" />
-                <col className="w-[8%]" />
+                <col className="w-[7%]" />
                 <col className="w-[7%]" />
                 <col className="w-[8%]" />
-                <col className="w-[7%]" />
-                <col className="w-[12%]" />
+                <col className="w-[6%]" />
+                <col className="w-[11%]" />
+                <col className="w-[8%]" />
                 <col className="w-[14%]" />
                 <col className="w-[9%]" />
               </colgroup>
               <thead>
                 <tr className="border-b border-border text-left text-[10px] uppercase leading-4 tracking-wide text-muted">
                   <th className="py-2 pr-3 font-medium">Publicação</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Visualizações</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Alcance</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Curtidas</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Comentários</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Salvos</th>
-                  <th className="px-1.5 py-2 font-medium text-right">Compartilhamentos</th>
+                  <SortHeader label="Visualizações" sortKey="views" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Alcance" sortKey="reach" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Curtidas" sortKey="likes" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Comentários" sortKey="comments" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Salvos" sortKey="saved" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Compartilhamentos" sortKey="shares" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
+                  <SortHeader label="Seguidores" sortKey="follows" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="px-1.5 py-2 font-medium text-right" />
                   <th className="px-1.5 py-2 font-medium">Campanha</th>
-                  <th className="py-2 pl-1.5 font-medium text-right">Data</th>
+                  <SortHeader label="Data" sortKey="timestamp" sort={sort} onSort={(key) => setSort(nextSort(sort, key))} className="py-2 pl-1.5 font-medium text-right" />
                 </tr>
               </thead>
               <tbody>
-                {posts.map((p) => (
+                {sortedPosts.map((p) => (
                   <tr
                     key={p.id}
                     className="border-b border-border last:border-0"
@@ -325,6 +401,9 @@ export default function OverviewPage() {
                     </td>
                     <td className="px-1.5 py-3 text-right tabular-nums text-muted">
                       {formatNumber(p.shares)}
+                    </td>
+                    <td className="px-1.5 py-3 text-right tabular-nums text-muted">
+                      {formatNumber(p.follows)}
                     </td>
                     <td className="min-w-0 px-1.5 py-2">
                       <div className="min-w-0 space-y-2">
