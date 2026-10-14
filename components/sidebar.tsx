@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand-logo";
 
-type NavIconName = "home" | "chart" | "growth" | "inbox" | "campaigns" | "feed" | "schedule" | "stories" | "logs" | "settings" | "diagnostics";
+type NavIconName = "home" | "chart" | "growth" | "inbox" | "campaigns" | "feed" | "schedule" | "stories" | "facebook" | "logs" | "settings" | "diagnostics";
 
 const navItems: Array<{ label: string; href: string; icon: NavIconName }> = [
   { label: "Painel", href: "/dashboard", icon: "home" },
@@ -15,6 +15,7 @@ const navItems: Array<{ label: string; href: string; icon: NavIconName }> = [
   { label: "Feed", href: "/feed", icon: "feed" },
   { label: "Agendar post", href: "/schedule", icon: "schedule" },
   { label: "Stories", href: "/stories", icon: "stories" },
+  { label: "Facebook", href: "/facebook", icon: "facebook" },
   { label: "Registros de DM", href: "/logs", icon: "logs" },
   { label: "Configurações", href: "/settings", icon: "settings" },
   { label: "Diagnóstico", href: "/diagnostics", icon: "diagnostics" },
@@ -83,6 +84,12 @@ function NavIcon({ name }: { name: NavIconName }) {
         <>
           <rect x="4" y="4" width="16" height="16" rx="6" strokeDasharray="2.5 2.5" />
           <path d="M12 8v8M8 12h8" />
+        </>
+      )}
+      {name === "facebook" && (
+        <>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="M14 20v-6h2.5M10.5 11H17M14 14c0-2 .6-3 2.5-3" />
         </>
       )}
       {name === "logs" && (

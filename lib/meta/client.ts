@@ -5,7 +5,7 @@ function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
 
-function facebookGraphBase() {
+export function facebookGraphBase() {
   return `https://graph.facebook.com/${getMetaGraphApiVersion()}`;
 }
 
@@ -146,7 +146,7 @@ export interface FacebookPageCandidate {
   instagramBusinessAccount?: { id: string; username?: string };
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
+export async function handleResponse<T>(response: Response): Promise<T> {
   const data = await response.json();
 
   if (!response.ok || (data as GraphApiError).error) {

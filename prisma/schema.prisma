@@ -178,12 +178,73 @@ model FacebookPage {
   accessToken       String
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean  @default(false)
+  /// Why the last webhook subscription attempt failed, shown next to "pending".
+  webhookError      String?
   connectedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automations FacebookAutomation[]
 
   @@index([workspaceId])
+}
+
+/// A comment-to-message rule for a Facebook Page. Kept apart from Automation on
+/// purpose: Automation is bound to an Instagram account and carries tracked
+/// links, A/B tests and follow gates that Facebook has no equivalent for, and
+/// adding a second kind of owner there would put the Instagram flows at risk.
+model FacebookAutomation {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  facebookPageId      String
+  name                String
+  /// Facebook video (or post) id the rule is bound to. Null with matchAnyPost.
+  videoId             String?
+  videoTitle          String?
+  videoUrl            String?
+  matchAnyPost        Boolean  @default(false)
+  keywords            String[]
+  matchAnyWord        Boolean  @default(false)
+  wholeWordMatch      Boolean  @default(true)
+  /// Private reply sent to the commenter's Messenger inbox.
+  dmMessage           String
+  linkUrl             String?
+  linkButtonLabel     String?
+  publicReplyEnabled  Boolean  @default(false)
+  publicReplyMessages String[] @default([])
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  facebookPage FacebookPage         @relation(fields: [facebookPageId], references: [id], onDelete: Cascade)
+  logs         FacebookCommentLog[]
+
+  @@index([workspaceId])
+  @@index([facebookPageId, isActive])
+}
+
+/// One handled comment. The unique key is the idempotency guard: Meta redelivers
+/// webhooks, and a second delivery must never send a second private reply.
+model FacebookCommentLog {
+  id                String    @id @default(cuid())
+  automationId      String
+  commentId         String
+  postId            String?
+  commenterId       String
+  commenterName     String?
+  commentText       String?   @db.Text
+  matchedKeyword    String?
+  status            DmStatus  @default(PENDING)
+  errorMessage      String?   @db.Text
+  dmSentAt          DateTime?
+  publicReplySentAt DateTime?
+  publicReplyError  String?   @db.Text
+  createdAt         DateTime  @default(now())
+
+  automation FacebookAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, commentId])
+  @@index([automationId, createdAt])
 }
 
 /// Uploaded media kept on persistent storage until the owner removes it. The

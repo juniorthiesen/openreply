@@ -78,11 +78,13 @@ export async function POST(request: NextRequest) {
     }
 
     let webhookSubscribed = false;
+    let webhookError: string | null = null;
     try {
       const subscription = await subscribeFacebookPageToWebhooks(page.id, page.access_token);
       webhookSubscribed = Boolean(subscription.success);
     } catch (error) {
       console.warn("[Facebook Connect] Page webhook subscription failed:", error);
+      webhookError = (error instanceof Error ? error.message : "Erro desconhecido").slice(0, 500);
     }
 
     await prisma.facebookPage.upsert({
@@ -94,6 +96,7 @@ export async function POST(request: NextRequest) {
         username: page.username,
         accessToken: encryptToken(page.access_token),
         webhookSubscribed,
+        webhookError,
       },
       update: {
         workspaceId: context.workspaceId,
@@ -101,6 +104,7 @@ export async function POST(request: NextRequest) {
         username: page.username,
         accessToken: encryptToken(page.access_token),
         webhookSubscribed,
+        webhookError,
       },
     });
     if (page.instagram_business_account?.id) {

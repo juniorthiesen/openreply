@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
+import { processFacebookWebhook } from "@/lib/facebook/comment-automation";
 import {
   parseCommentEvents,
   verifyWebhookSignature,
@@ -59,6 +60,14 @@ export async function POST(request: NextRequest) {
       { success: false, error: "Invalid JSON" },
       { status: 400 }
     );
+  }
+
+  // A Facebook Page delivers through this same URL with object "page". Answer
+  // Meta first and handle the comments after: sending the replies takes
+  // several Graph calls, and a slow response makes Meta redeliver the event.
+  if ((payload as { object?: string } | null)?.object === "page") {
+    after(() => processFacebookWebhook(payload));
+    return NextResponse.json({ success: true });
   }
 
   try {

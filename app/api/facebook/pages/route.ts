@@ -19,6 +19,7 @@ export async function GET() {
       name: true,
       username: true,
       webhookSubscribed: true,
+      webhookError: true,
       connectedAt: true,
     },
     orderBy: { connectedAt: "desc" },

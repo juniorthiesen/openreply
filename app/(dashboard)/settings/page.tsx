@@ -55,6 +55,7 @@ interface FacebookPageData {
   name: string;
   username: string | null;
   webhookSubscribed: boolean;
+  webhookError: string | null;
 }
 
 export default function SettingsPage() {
@@ -102,6 +103,28 @@ export default function SettingsPage() {
       body: JSON.stringify({ instagramAccountId }),
     });
     window.location.reload();
+  }
+
+  async function retryFacebookWebhook(page: FacebookPageData) {
+    setFacebookError(null);
+    setBusy(`facebook-webhook:${page.id}`);
+    try {
+      const response = await fetch("/api/facebook/pages/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId: page.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      const pagesPayload = await fetch("/api/facebook/pages").then((res) => res.json());
+      if (pagesPayload.success) setFacebookPages(pagesPayload.data.pages);
+      if (!response.ok || !payload.success) {
+        setFacebookError(payload.error ?? "Não foi possível ativar o webhook da Página.");
+      }
+    } catch {
+      setFacebookError("Não foi possível ativar o webhook da Página. Tente novamente.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function disconnectFacebookPage(page: FacebookPageData) {
@@ -295,9 +318,25 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm font-semibold text-foreground">{page.name}</p>
                 <p className="mt-1 text-xs text-muted">{page.webhookSubscribed ? "Webhook solicitado" : "Webhook pendente"}</p>
+                {!page.webhookSubscribed && page.webhookError && (
+                  <p className="mt-1 break-words text-xs text-error">Motivo informado pela Meta: {page.webhookError}</p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">Conectada</span>
+                <a href="/facebook" className="inline-flex items-center justify-center rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover">
+                  Métricas e respostas
+                </a>
+                {!page.webhookSubscribed && (
+                  <button
+                    type="button"
+                    onClick={() => void retryFacebookWebhook(page)}
+                    disabled={busy === `facebook-webhook:${page.id}`}
+                    className="inline-flex items-center justify-center rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  >
+                    {busy === `facebook-webhook:${page.id}` ? "Tentando..." : "Tentar de novo"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void disconnectFacebookPage(page)}
