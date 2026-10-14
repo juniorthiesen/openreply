@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { NOT_AB_VARIANT_LINK } from "@/lib/ab/link-filter";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import {
+  createCampaign,
+  createCampaignSchema,
+  updateCampaign,
+  updateCampaignSchema,
+  type CampaignResult,
+} from "@/lib/campaigns/service";
 import {
   calculateCtr,
   CLICK_ROW_SELECT,
@@ -11,10 +17,6 @@ import {
 } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
-import {
-  buildInitialCampaignLinks,
-  syncCampaignLinks,
-} from "@/lib/campaigns/links";
 import { buildReportUrl, generateReportShareSlug } from "@/lib/reports/share";
 import {
   canManageWorkspace,
@@ -25,160 +27,18 @@ import {
 // immediately), so never cache it at the route or CDN layer.
 export const dynamic = "force-dynamic";
 
-type CampaignRuleFields = {
-  matchAnyPost: boolean;
-  pendingNextReel: boolean;
-  postId?: string | null;
-  matchAnyWord: boolean;
-  keywords: string[];
-  openingDmEnabled: boolean;
-  openingDmMessage?: string | null;
-  openingDmButtonLabel?: string | null;
-};
-
-// Invariants every saved campaign must satisfy. POST checks the request body;
-// PATCH checks the existing row merged with the update, since a partial body
-// can break a rule on its own (e.g. enabling the opening DM with no message).
-function findCampaignRuleViolation(
-  d: CampaignRuleFields
-): { message: string; path: string } | null {
-  // A campaign must target a specific post, any post, or the next reel.
-  if (!d.matchAnyPost && !d.pendingNextReel && !d.postId) {
-    return { message: "Choose which post(s) trigger the campaign", path: "postId" };
-  }
-  // And it must match either specific words or any word.
-  if (!d.matchAnyWord && d.keywords.length === 0) {
-    return { message: "Add at least one keyword, or match any word", path: "keywords" };
-  }
-  // An opening DM needs both a message and a button label.
-  if (
-    d.openingDmEnabled &&
-    (!d.openingDmMessage?.trim() || !d.openingDmButtonLabel?.trim())
-  ) {
-    return {
-      message: "Opening DM needs a message and a button label",
-      path: "openingDmMessage",
-    };
-  }
-  return null;
-}
-
-function hasPublicReplyText(
-  messages?: string[] | null,
-  legacyMessage?: string | null
-): boolean {
-  return (
-    Boolean(legacyMessage?.trim()) ||
-    (messages ?? []).some((message) => Boolean(message.trim()))
+// The create/update rules live in lib/campaigns/service.ts so the MCP server
+// applies exactly the same ones; the handlers below only add auth and parsing.
+function failureResponse(result: Extract<CampaignResult<unknown>, { ok: false }>) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: result.error,
+      ...(result.details ? { details: result.details } : {}),
+    },
+    { status: result.status }
   );
 }
-
-const createAutomationSchema = z
-  .object({
-    name: z.string().min(1).max(100),
-    goal: z.string().min(1).max(120).optional().nullable(),
-    instagramAccountId: z.string().min(1).optional().nullable(),
-    postId: z.string().min(1).optional().nullable(),
-    postUrl: z.string().url().optional().nullable(),
-    pendingNextReel: z.boolean().optional().default(false),
-    matchAnyPost: z.boolean().optional().default(false),
-    keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
-    matchAnyWord: z.boolean().optional().default(false),
-    dmTriggerEnabled: z.boolean().optional().default(false),
-    // One Story whose replies this campaign answers (needs dmTriggerEnabled).
-    storyMediaId: z.string().min(1).max(100).optional().nullable(),
-    dmMessage: z.string().min(1).max(1000),
-    openingDmEnabled: z.boolean().optional().default(false),
-    openingDmMessage: z.string().max(1000).optional().nullable(),
-    openingDmButtonLabel: z.string().max(64).optional().nullable(),
-    linkButtonLabel: z.string().max(20).optional().nullable(),
-    requireFollow: z.boolean().optional().default(false),
-    followPromptMessage: z.string().max(1000).optional().nullable(),
-    followPromptButtonLabel: z.string().max(20).optional().nullable(),
-    followUpEnabled: z.boolean().optional().default(false),
-    followUpMessage: z.string().max(1000).optional().nullable(),
-    // Minutes to wait before the follow-up. Capped at 24h so it stays inside
-    // Instagram's messaging window.
-    followUpDelayMinutes: z.number().int().min(0).max(1440).optional().default(0),
-    publicReplyEnabled: z.boolean().optional().default(false),
-    publicReplyMessage: z.string().max(1000).optional().nullable(),
-    publicReplyMessages: z
-      .array(z.string().max(1000))
-      .max(10)
-      .optional()
-      .default([]),
-    // Empty string means "no tracked link"; a URL sets one.
-    trackedDestinationUrl: z
-      .union([z.string().url(), z.literal("")])
-      .optional()
-      .nullable(),
-    // Optional second tracked link, rendered as a second DM button.
-    secondaryDestinationUrl: z
-      .union([z.string().url(), z.literal("")])
-      .optional()
-      .nullable(),
-    secondaryButtonLabel: z.string().max(20).optional().nullable(),
-    isActive: z.boolean().optional().default(true),
-    wholeWordMatch: z.boolean().optional().default(true),
-  })
-  .superRefine((d, ctx) => {
-    const violation = findCampaignRuleViolation(d);
-    if (violation) {
-      ctx.addIssue({ code: "custom", message: violation.message, path: [violation.path] });
-    }
-    if (
-      d.publicReplyEnabled &&
-      !hasPublicReplyText(d.publicReplyMessages, d.publicReplyMessage)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Adicione ao menos uma resposta pública ou desative essa opção.",
-        path: ["publicReplyMessages"],
-      });
-    }
-  });
-
-const updateAutomationSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  goal: z.string().min(1).max(120).optional().nullable(),
-  postId: z.string().min(1).optional().nullable(),
-  postUrl: z.string().url().optional().nullable(),
-  pendingNextReel: z.boolean().optional(),
-  matchAnyPost: z.boolean().optional(),
-  keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
-  matchAnyWord: z.boolean().optional(),
-  dmTriggerEnabled: z.boolean().optional(),
-  storyMediaId: z.string().min(1).max(100).optional().nullable(),
-  dmMessage: z.string().min(1).max(1000).optional(),
-  openingDmEnabled: z.boolean().optional(),
-  openingDmMessage: z.string().max(1000).optional().nullable(),
-  openingDmButtonLabel: z.string().max(64).optional().nullable(),
-  linkButtonLabel: z.string().max(20).optional().nullable(),
-  requireFollow: z.boolean().optional(),
-  followPromptMessage: z.string().max(1000).optional().nullable(),
-  followPromptButtonLabel: z.string().max(20).optional().nullable(),
-  followUpEnabled: z.boolean().optional(),
-  followUpMessage: z.string().max(1000).optional().nullable(),
-  followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
-  publicReplyEnabled: z.boolean().optional(),
-  publicReplyMessage: z.string().max(1000).optional().nullable(),
-  publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
-  isActive: z.boolean().optional(),
-  wholeWordMatch: z.boolean().optional(),
-  reportShareEnabled: z.boolean().optional(),
-  // Empty string clears the tracked link; a URL updates/creates it; undefined
-  // leaves it unchanged.
-  trackedDestinationUrl: z
-    .union([z.string().url(), z.literal("")])
-    .optional()
-    .nullable(),
-  // Same semantics for the optional second tracked link / DM button.
-  secondaryDestinationUrl: z
-    .union([z.string().url(), z.literal("")])
-    .optional()
-    .nullable(),
-  secondaryButtonLabel: z.string().max(20).optional().nullable(),
-});
 
 export async function GET(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -354,10 +214,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const workspaceId = context.workspaceId;
-
   const body = await request.json().catch(() => ({}));
-  const parsed = createAutomationSchema.safeParse(body);
+  const parsed = createCampaignSchema.safeParse(body);
 
   if (!parsed.success) {
     return NextResponse.json(
@@ -370,135 +228,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const requestedInstagramAccountId =
-    parsed.data.instagramAccountId && parsed.data.instagramAccountId !== "all"
-      ? parsed.data.instagramAccountId
-      : null;
+  const result = await createCampaign(context.workspaceId, parsed.data);
+  if (!result.ok) return failureResponse(result);
 
-  const [workspace, instagramAccount] = await Promise.all([
-    prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { id: true },
-    }),
-    requestedInstagramAccountId
-      ? prisma.instagramAccount.findFirst({
-          where: { id: requestedInstagramAccountId, workspaceId },
-        })
-      : prisma.instagramAccount.findFirst({
-          where: { workspaceId },
-          orderBy: { connectedAt: "desc" },
-        }),
-  ]);
-
-  if (!workspace) {
-    return NextResponse.json(
-      { success: false, error: "Workspace not found" },
-      { status: 404 }
-    );
-  }
-
-  if (!instagramAccount) {
-    return NextResponse.json(
-      { success: false, error: "Connect Instagram before creating campaigns" },
-      { status: 400 }
-    );
-  }
-
-  const linkCreates = buildInitialCampaignLinks({
-    workspaceId,
-    primaryUrl: parsed.data.trackedDestinationUrl,
-    secondaryUrl: parsed.data.secondaryDestinationUrl,
-    secondaryLabel: parsed.data.secondaryButtonLabel,
-  });
-
-  if (parsed.data.dmTriggerEnabled && parsed.data.storyMediaId) {
-    const story = await prisma.externalStory.findFirst({
-      where: { workspaceId, instagramMediaId: parsed.data.storyMediaId },
-      select: { id: true },
-    });
-    if (!story) {
-      return NextResponse.json(
-        { success: false, error: "Esse Story não foi encontrado nos Stories capturados." },
-        { status: 400 }
-      );
-    }
-  }
-
-  const { pendingNextReel, matchAnyPost, matchAnyWord, openingDmEnabled } =
-    parsed.data;
-  // A post is only stored for the "specific post" trigger.
-  const isSpecificPost = !pendingNextReel && !matchAnyPost;
-  const publicReplyList = (
-    parsed.data.publicReplyMessages.length > 0
-      ? parsed.data.publicReplyMessages
-      : parsed.data.publicReplyMessage
-        ? [parsed.data.publicReplyMessage]
-        : []
-  )
-    .map((m) => m.trim())
-    .filter(Boolean);
-
-  const automation = await prisma.automation.create({
-    data: {
-      name: parsed.data.name,
-      goal: parsed.data.goal,
-      // A next-reel campaign has no post yet; the cron binds it once a reel is posted.
-      postId: isSpecificPost ? parsed.data.postId : null,
-      postUrl: isSpecificPost ? parsed.data.postUrl : null,
-      pendingNextReel,
-      matchAnyPost,
-      keywords: matchAnyWord ? [] : parsed.data.keywords,
-      matchAnyWord,
-      dmTriggerEnabled: parsed.data.dmTriggerEnabled,
-      storyMediaId: parsed.data.dmTriggerEnabled ? parsed.data.storyMediaId || null : null,
-      dmMessage: parsed.data.dmMessage,
-      openingDmEnabled,
-      openingDmMessage: openingDmEnabled
-        ? parsed.data.openingDmMessage || null
-        : null,
-      openingDmButtonLabel: openingDmEnabled
-        ? parsed.data.openingDmButtonLabel || null
-        : null,
-      linkButtonLabel: parsed.data.linkButtonLabel || null,
-      requireFollow: parsed.data.requireFollow,
-      followPromptMessage: parsed.data.requireFollow
-        ? parsed.data.followPromptMessage || null
-        : null,
-      followPromptButtonLabel: parsed.data.requireFollow
-        ? parsed.data.followPromptButtonLabel || null
-        : null,
-      followUpEnabled: parsed.data.followUpEnabled,
-      followUpMessage: parsed.data.followUpEnabled
-        ? parsed.data.followUpMessage || null
-        : null,
-      followUpDelayMinutes: parsed.data.followUpEnabled
-        ? parsed.data.followUpDelayMinutes
-        : 0,
-      publicReplyEnabled: parsed.data.publicReplyEnabled,
-      publicReplyMessages: parsed.data.publicReplyEnabled
-        ? publicReplyList
-        : [],
-      publicReplyMessage: parsed.data.publicReplyEnabled
-        ? publicReplyList[0] ?? parsed.data.publicReplyMessage ?? null
-        : null,
-      isActive: parsed.data.isActive,
-      wholeWordMatch: parsed.data.wholeWordMatch,
-      workspaceId,
-      instagramAccountId: instagramAccount.id,
-      reportShareSlug: generateReportShareSlug(),
-      ...(linkCreates.length > 0
-        ? { trackedLinks: { create: linkCreates } }
-        : {}),
-    },
-    include: {
-      trackedLinks: true,
-    },
-  });
-
-  return NextResponse.json(
-    { success: true, data: automation },
-    { status: 201 }
-  );
+  return NextResponse.json({ success: true, data: result.data }, { status: 201 });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -517,8 +250,6 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const workspaceId = context.workspaceId;
-
   const automationId = request.nextUrl.searchParams.get("id");
   if (!automationId) {
     return NextResponse.json(
@@ -528,7 +259,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const parsed = updateAutomationSchema.safeParse(body);
+  const parsed = updateCampaignSchema.safeParse(body);
 
   if (!parsed.success) {
     return NextResponse.json(
@@ -541,156 +272,10 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const existing = await prisma.automation.findFirst({
-    where: { id: automationId, workspaceId },
-  });
+  const result = await updateCampaign(context.workspaceId, automationId, parsed.data);
+  if (!result.ok) return failureResponse(result);
 
-  if (!existing) {
-    return NextResponse.json(
-      { success: false, error: "Campaign not found" },
-      { status: 404 }
-    );
-  }
-
-  const {
-    trackedDestinationUrl,
-    secondaryDestinationUrl,
-    secondaryButtonLabel,
-    ...automationData
-  } = parsed.data;
-
-  // While an A/B test runs, the worker sends the test's own variants, so a change
-  // to the link DM would reach nobody and the test's numbers would stop meaning
-  // what they say. Only a real change is refused, so saving anything else works.
-  const runningTest = await prisma.abTest.findFirst({
-    where: { automationId, status: "RUNNING" },
-    select: { id: true },
-  });
-  if (runningTest) {
-    const primaryLink = await prisma.trackedLink.findFirst({
-      where: { automationId, ...NOT_AB_VARIANT_LINK },
-      orderBy: TRACKED_LINK_ORDER,
-      select: { destinationUrl: true },
-    });
-    const changesLinkDm =
-      (automationData.dmMessage !== undefined && automationData.dmMessage !== existing.dmMessage) ||
-      (automationData.linkButtonLabel !== undefined &&
-        (automationData.linkButtonLabel ?? "") !== (existing.linkButtonLabel ?? "")) ||
-      (trackedDestinationUrl !== undefined &&
-        trackedDestinationUrl !== null &&
-        trackedDestinationUrl !== (primaryLink?.destinationUrl ?? ""));
-    if (changesLinkDm) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Há um teste A/B em andamento. Encerre o teste na aba Teste A/B antes de mudar a mensagem, o botão ou o link da DM.",
-        },
-        { status: 409 }
-      );
-    }
-  }
-
-  // A Story only means something to a campaign that answers DMs.
-  if (automationData.dmTriggerEnabled === false) automationData.storyMediaId = null;
-  if (automationData.storyMediaId && automationData.storyMediaId !== existing.storyMediaId) {
-    const story = await prisma.externalStory.findFirst({
-      where: { workspaceId, instagramMediaId: automationData.storyMediaId },
-      select: { id: true },
-    });
-    if (!story) {
-      return NextResponse.json(
-        { success: false, error: "Esse Story não foi encontrado nos Stories capturados." },
-        { status: 400 }
-      );
-    }
-  }
-
-  // Keep dependent fields consistent: any-word clears keywords; a disabled
-  // opening DM clears its message and button.
-  if (automationData.matchAnyWord === true) automationData.keywords = [];
-  if (automationData.openingDmEnabled === false) {
-    automationData.openingDmMessage = null;
-    automationData.openingDmButtonLabel = null;
-  }
-  if (automationData.requireFollow === false) {
-    automationData.followPromptMessage = null;
-    automationData.followPromptButtonLabel = null;
-  }
-  if (automationData.followUpEnabled === false) {
-    automationData.followUpMessage = null;
-    automationData.followUpDelayMinutes = 0;
-  }
-  // Any-post / next-reel campaigns carry no specific post.
-  if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {
-    automationData.postId = null;
-    automationData.postUrl = null;
-  }
-  // Keep the public-reply variations list and the legacy single field in sync.
-  if (automationData.publicReplyMessages !== undefined) {
-    const list = automationData.publicReplyMessages
-      .map((m) => m.trim())
-      .filter(Boolean);
-    automationData.publicReplyMessages = list;
-    automationData.publicReplyMessage = list[0] ?? null;
-  }
-  if (automationData.publicReplyEnabled === false) {
-    automationData.publicReplyMessages = [];
-    automationData.publicReplyMessage = null;
-  }
-
-  // Only an active campaign has to be valid: the worker ignores paused ones,
-  // and pausing must keep working even for a row saved before this check.
-  const merged = { ...existing, ...automationData };
-  if (
-    merged.publicReplyEnabled &&
-    !hasPublicReplyText(merged.publicReplyMessages, merged.publicReplyMessage)
-  ) {
-    const message =
-      "Adicione ao menos uma resposta pública ou desative essa opção.";
-    return NextResponse.json(
-      {
-        success: false,
-        error: message,
-        details: { fieldErrors: { publicReplyMessages: [message] } },
-      },
-      { status: 400 }
-    );
-  }
-
-  const violation = merged.isActive ? findCampaignRuleViolation(merged) : null;
-  if (violation) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: violation.message,
-        details: { fieldErrors: { [violation.path]: [violation.message] } },
-      },
-      { status: 400 }
-    );
-  }
-
-  // One transaction, so a save never lands half applied. Updating the campaign
-  // first locks its row, which makes a second save of the same campaign wait
-  // for this one before it reads the links.
-  const updated = await prisma.$transaction(async (tx) => {
-    const campaign = await tx.automation.update({
-      where: { id: automationId },
-      data: automationData,
-    });
-
-    await syncCampaignLinks(tx, {
-      workspaceId,
-      automationId,
-      primaryUrl: trackedDestinationUrl,
-      secondaryUrl: secondaryDestinationUrl,
-      secondaryLabel: secondaryButtonLabel,
-    });
-
-    return campaign;
-  });
-
-  return NextResponse.json({ success: true, data: updated });
+  return NextResponse.json({ success: true, data: result.data });
 }
 
 export async function DELETE(request: NextRequest) {
