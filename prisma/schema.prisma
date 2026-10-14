@@ -93,8 +93,37 @@ model Workspace {
   externalStories   ExternalStory[]
   aiGenerations     AiGeneration[]
   aiConnection      AiConnection?
+  apiTokens         ApiToken[]
 
   @@index([ownerId])
+}
+
+enum ApiTokenScope {
+  READ
+  WRITE
+}
+
+/// A workspace-scoped access token for the MCP endpoint. Only the SHA-256 of the
+/// token is stored, so a database leak does not hand out working credentials; the
+/// plain token is shown once, when it is created.
+model ApiToken {
+  id          String        @id @default(cuid())
+  workspaceId String
+  createdById String
+  name        String
+  /// SHA-256 (hex) of the token. The token itself is 256 random bits, so a
+  /// plain hash is enough — there is nothing to brute-force.
+  tokenHash   String        @unique
+  /// First characters of the token, to tell tokens apart in the list.
+  tokenPrefix String
+  scope       ApiTokenScope @default(READ)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model WorkspaceMember {

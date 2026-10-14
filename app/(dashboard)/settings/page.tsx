@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import { FacebookConnectNotice } from "@/components/facebook-connect-notice";
+import McpTokens from "@/components/mcp-tokens";
 import { InstagramManualTokenForm } from "@/components/instagram-manual-token-form";
 import AiConnectionSettings from "@/components/ai/ai-connection-settings";
 
@@ -355,6 +356,8 @@ export default function SettingsPage() {
           </a>
         </div>
       </section>
+
+      <McpTokens />
 
       <section className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">Equipe</h2>
