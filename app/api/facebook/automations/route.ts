@@ -38,6 +38,12 @@ const ruleSchema = z.object({
 
 type RuleInput = z.infer<typeof ruleSchema>;
 
+// A rule tied to an Instagram campaign is the Facebook half of it, and is
+// re-derived from the campaign on every save. Editing it here would be undone
+// by the next save there.
+const LINKED_RULE_MESSAGE =
+  "Esta resposta faz parte de uma campanha. Edite a campanha em Campanhas.";
+
 /** Cross-field rules that a per-field schema can't express. */
 function validateRule(rule: Pick<
   RuleInput,
@@ -154,6 +160,12 @@ export async function PATCH(request: NextRequest) {
   if (!existing) {
     return NextResponse.json({ success: false, error: "Campanha não encontrada." }, { status: 404 });
   }
+  if (existing.automationId) {
+    return NextResponse.json(
+      { success: false, error: LINKED_RULE_MESSAGE },
+      { status: 409 }
+    );
+  }
 
   const parsed = ruleSchema.partial().safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -194,7 +206,8 @@ export async function DELETE(request: NextRequest) {
   if (!id) return NextResponse.json({ success: false, error: "id é obrigatório" }, { status: 400 });
 
   const result = await prisma.facebookAutomation.deleteMany({
-    where: { id, workspaceId: context.workspaceId },
+    // A rule that belongs to a campaign goes with the campaign, not on its own.
+    where: { id, workspaceId: context.workspaceId, automationId: null },
   });
   if (result.count !== 1) {
     return NextResponse.json({ success: false, error: "Campanha não encontrada." }, { status: 404 });

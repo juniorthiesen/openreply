@@ -31,6 +31,32 @@ import {
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
+type FacebookScope = "specific" | "any";
+
+interface FacebookPageOption {
+  id: string;
+  name: string;
+  webhookSubscribed: boolean;
+}
+
+interface FacebookVideoOption {
+  id: string;
+  title: string | null;
+  createdTime: string | null;
+  permalinkUrl: string | null;
+  thumbnailUrl: string | null;
+  isReel: boolean;
+  comments: number | null;
+}
+
+/** The Facebook half of a campaign as the API returns it. */
+interface LoadedFacebook {
+  facebookPageId: string;
+  matchAnyPost: boolean;
+  videoId: string | null;
+  videoTitle: string | null;
+  videoUrl: string | null;
+}
 
 interface LoadedCampaign {
   id: string;
@@ -60,15 +86,40 @@ interface LoadedCampaign {
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
+  facebook?: LoadedFacebook | null;
+}
+
+/** A campaign that runs on Facebook only: the Facebook rule itself. */
+interface LoadedFacebookRule extends LoadedFacebook {
+  id: string;
+  name: string;
+  keywords: string[];
+  matchAnyWord: boolean;
+  dmMessage: string;
+  linkUrl: string | null;
+  linkButtonLabel: string | null;
+  publicReplyEnabled: boolean;
+  publicReplyMessages: string[];
+  isActive: boolean;
+  automationId: string | null;
 }
 
 interface CampaignBuilderProps {
   mode: "new" | "edit";
+  /** The Instagram campaign being edited (which may also run on Facebook). */
   campaignId?: string;
+  /** The Facebook-only campaign being edited. */
+  facebookRuleId?: string;
   initialPost?: {
     instagramAccountId: string;
     postId: string;
     postUrl: string | null;
+  };
+  /** A Facebook video to start a new campaign from (Facebook only). */
+  initialFacebook?: {
+    videoId: string | null;
+    videoTitle: string | null;
+    videoUrl: string | null;
   };
 }
 
@@ -140,10 +191,62 @@ function Toggle({
   );
 }
 
+/** One channel (Instagram or Facebook) the campaign can run on. */
+function ChannelOption({
+  label,
+  detail,
+  on,
+  locked,
+  disabled,
+  onToggle,
+}: {
+  label: string;
+  detail: React.ReactNode;
+  on: boolean;
+  /** Can't be switched in this screen, e.g. the half that already exists. */
+  locked?: boolean;
+  /** Not available at all, e.g. nothing connected. */
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  const inactive = Boolean(locked || disabled);
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 ${
+        on ? "border-accent bg-accent/5" : "border-border"
+      } ${disabled ? "opacity-60" : ""}`}
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="truncate text-xs text-muted">{detail}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={`${on ? "Desligar" : "Ligar"} ${label}`}
+        onClick={inactive ? undefined : onToggle}
+        disabled={inactive}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+          on ? "bg-accent" : "bg-border-hover"
+        } ${inactive ? "cursor-not-allowed opacity-70" : ""}`}
+      >
+        <span
+          className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${
+            on ? "left-6" : "left-1"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 export default function CampaignBuilder({
   mode,
   campaignId,
+  facebookRuleId,
   initialPost,
+  initialFacebook,
 }: CampaignBuilderProps) {
   const router = useRouter();
 
@@ -198,6 +301,28 @@ export default function CampaignBuilder({
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+
+  // Channels. A campaign is written once and runs on Instagram, Facebook or
+  // both. Starting from a Facebook video (or editing a Facebook-only campaign)
+  // begins with Instagram off.
+  const startsOnFacebook = Boolean(initialFacebook || facebookRuleId);
+  const [instagramEnabled, setInstagramEnabled] = useState(!startsOnFacebook);
+  const [facebookEnabled, setFacebookEnabled] = useState(startsOnFacebook);
+  const [facebookPages, setFacebookPages] = useState<FacebookPageOption[]>([]);
+  const [facebookPageId, setFacebookPageId] = useState("");
+  const [facebookScope, setFacebookScope] = useState<FacebookScope>("specific");
+  const [facebookVideoId, setFacebookVideoId] = useState<string | null>(
+    initialFacebook?.videoId ?? null
+  );
+  const [facebookVideoTitle, setFacebookVideoTitle] = useState<string | null>(
+    initialFacebook?.videoTitle ?? null
+  );
+  const [facebookVideoUrl, setFacebookVideoUrl] = useState<string | null>(
+    initialFacebook?.videoUrl ?? null
+  );
+  const [facebookVideos, setFacebookVideos] = useState<FacebookVideoOption[]>([]);
+  const [facebookVideosError, setFacebookVideosError] = useState<string | null>(null);
+  const [facebookLoaded, setFacebookLoaded] = useState(false);
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -307,10 +432,76 @@ export default function CampaignBuilder({
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        if (c.facebook) {
+          setFacebookEnabled(true);
+          setFacebookPageId(c.facebook.facebookPageId);
+          setFacebookScope(c.facebook.matchAnyPost ? "any" : "specific");
+          setFacebookVideoId(c.facebook.videoId);
+          setFacebookVideoTitle(c.facebook.videoTitle);
+          setFacebookVideoUrl(c.facebook.videoUrl);
+        }
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [mode, campaignId]);
+
+  // Prefill when editing a campaign that runs on Facebook only.
+  useEffect(() => {
+    if (!facebookRuleId) return;
+    fetch("/api/facebook/automations", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload) => {
+        const rule = payload.success
+          ? (payload.data.rules as LoadedFacebookRule[]).find((x) => x.id === facebookRuleId)
+          : null;
+        // A rule that belongs to an Instagram campaign is edited through that
+        // campaign, never on its own.
+        if (!rule || rule.automationId) return setNotFound(true);
+        setName(rule.name);
+        setFacebookPageId(rule.facebookPageId);
+        setFacebookScope(rule.matchAnyPost ? "any" : "specific");
+        setFacebookVideoId(rule.videoId);
+        setFacebookVideoTitle(rule.videoTitle);
+        setFacebookVideoUrl(rule.videoUrl);
+        setMatchMode(rule.matchAnyWord ? "any" : "specific");
+        setKeywordText(rule.keywords.join(", "));
+        setDmMessage(rule.dmMessage);
+        setTrackedDestinationUrl(rule.linkUrl ?? "");
+        setLinkOpen(Boolean(rule.linkUrl));
+        setLinkButtonLabel(rule.linkButtonLabel ?? "Abrir link");
+        setPublicReplyEnabled(rule.publicReplyEnabled);
+        setPublicReplyMessages(rule.publicReplyMessages.length ? rule.publicReplyMessages : [""]);
+        setIsActive(rule.isActive);
+      })
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false));
+  }, [facebookRuleId]);
+
+  // The connected Pages (so the Facebook channel can say when none is
+  // connected) and, once Facebook is switched on, the chosen Page's videos.
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ videos: facebookEnabled ? "1" : "0" });
+    if (facebookPageId) params.set("pageId", facebookPageId);
+    fetch(`/api/facebook/videos?${params}`)
+      .then((r) => r.json())
+      .then((payload) => {
+        if (cancelled || !payload.success) return;
+        setFacebookPages(payload.data.pages ?? []);
+        setFacebookPageId((prev) => prev || payload.data.selectedPageId || "");
+        if (facebookEnabled) {
+          setFacebookVideos(payload.data.videos ?? []);
+          setFacebookVideosError(payload.data.videosError ?? null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setFacebookLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [facebookEnabled, facebookPageId]);
 
   // Track which posts on the selected account are already assigned to an
   // automation, so the picker can highlight them. The campaign being edited is
@@ -386,6 +577,17 @@ export default function CampaignBuilder({
   const username =
     accounts.find((a) => a.id === selectedAccountId)?.username ?? "yourbrand";
 
+  // At least one channel stays on: a campaign that runs nowhere is meaningless.
+  function toggleInstagram() {
+    if (instagramEnabled && !facebookEnabled) return;
+    setInstagramEnabled((on) => !on);
+  }
+  function toggleFacebook() {
+    if (facebookEnabled && !instagramEnabled) return;
+    setFacebookEnabled((on) => !on);
+  }
+  const selectedFacebookPage = facebookPages.find((page) => page.id === facebookPageId);
+
   function handlePostSelect(
     id: string,
     url?: string,
@@ -425,15 +627,28 @@ export default function CampaignBuilder({
   async function handleSubmit(activeValue: boolean) {
     setError(null);
 
-    if (!selectedAccountId) return setError("Conecte uma conta do Instagram antes de continuar.");
+    if (!instagramEnabled && !facebookEnabled)
+      return setError("Escolha ao menos um canal: Instagram ou Facebook.");
+    if (instagramEnabled && !selectedAccountId)
+      return setError("Conecte uma conta do Instagram antes de continuar.");
+    if (facebookEnabled) {
+      if (!facebookPageId)
+        return setError("Conecte uma Página do Facebook em Configurações para usar esse canal.");
+      if (facebookScope === "specific" && !facebookVideoId)
+        return setError("Escolha o vídeo do Facebook que aciona a campanha.");
+    }
     // A campaign pinned to a Story is triggered by the Story reply, not by a post.
     const pinnedToStory = dmTriggerEnabled && Boolean(storyMediaId);
-    if (triggerScope === "specific" && !postId && !pinnedToStory)
+    if (instagramEnabled && triggerScope === "specific" && !postId && !pinnedToStory)
       return setError("Escolha uma publicação ou reel para acionar a campanha.");
     if (matchMode === "specific" && keywords.length === 0)
       return setError("Adicione pelo menos uma palavra-chave ou use a opção para qualquer palavra.");
     if (!dmMessage.trim()) return setError("Escreva a mensagem direta com o link.");
-    if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
+    if (
+      instagramEnabled &&
+      openingDmEnabled &&
+      (!openingDmMessage.trim() || !openingDmButtonLabel.trim())
+    )
       return setError("A mensagem inicial precisa de um texto e do rótulo do botão.");
     if (
       publicReplyEnabled &&
@@ -446,8 +661,24 @@ export default function CampaignBuilder({
 
     setSaving(true);
 
+    // The Facebook half of the campaign. Editing with Facebook switched off
+    // sends null so the half that exists is removed; a new campaign just omits it.
+    const facebookChannel = facebookEnabled
+      ? {
+          facebookPageId,
+          matchAnyPost: facebookScope === "any",
+          videoId: facebookScope === "specific" ? facebookVideoId : null,
+          videoTitle: facebookScope === "specific" ? facebookVideoTitle : null,
+          videoUrl: facebookScope === "specific" ? facebookVideoUrl : null,
+        }
+      : mode === "edit"
+        ? null
+        : undefined;
+
     const payload = {
-      name: name.trim() || `Campaign for @${username}`,
+      name:
+        name.trim() ||
+        (instagramEnabled ? `Campaign for @${username}` : "Campanha no Facebook"),
       instagramAccountId: selectedAccountId,
       postId: triggerScope === "specific" ? postId : null,
       postUrl: triggerScope === "specific" ? postUrl : null,
@@ -478,28 +709,56 @@ export default function CampaignBuilder({
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
       isActive: activeValue,
+      facebook: facebookChannel,
     };
 
+    // Facebook only: there is no Instagram campaign, so the rule is saved on its own.
+    const facebookOnlyBody = {
+      facebookPageId,
+      name: payload.name,
+      matchAnyPost: facebookScope === "any",
+      videoId: facebookScope === "specific" ? facebookVideoId : null,
+      videoTitle: facebookScope === "specific" ? facebookVideoTitle : null,
+      videoUrl: facebookScope === "specific" ? facebookVideoUrl : null,
+      matchAnyWord: matchMode === "any",
+      keywords: matchMode === "any" ? [] : keywords,
+      dmMessage: dmMessage.trim(),
+      linkUrl: trackedDestinationUrl.trim() || null,
+      linkButtonLabel: linkButtonLabel.trim() || "Abrir link",
+      publicReplyEnabled,
+      publicReplyMessages: publicReplyEnabled
+        ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
+        : [],
+      isActive: activeValue,
+    };
+
+    const request = !instagramEnabled
+      ? {
+          url: facebookRuleId
+            ? `/api/facebook/automations?id=${facebookRuleId}`
+            : "/api/facebook/automations",
+          method: facebookRuleId ? "PATCH" : "POST",
+          body: facebookOnlyBody,
+        }
+      : {
+          url: mode === "new" ? "/api/automations" : `/api/automations?id=${campaignId}`,
+          method: mode === "new" ? "POST" : "PATCH",
+          body: payload,
+        };
+
     try {
-      const res =
-        mode === "new"
-          ? await fetch("/api/automations", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            })
-          : await fetch(`/api/automations?id=${campaignId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
+      const res = await fetch(request.url, {
+        method: request.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request.body),
+      });
       const data = await res.json();
       if (data.success) {
         // The post we just assigned is now in use. Reflect it immediately so
         // the picker flags it on the next imported row — the fetch that builds
         // this map doesn't re-run while the builder stays mounted through the
         // import queue.
-        if (triggerScope === "specific" && postId) {
+        if (instagramEnabled && triggerScope === "specific" && postId) {
           const assignedPostId = postId;
           setUsedPosts((prev) => ({ ...prev, [assignedPostId]: payload.name }));
         }
@@ -701,7 +960,7 @@ export default function CampaignBuilder({
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none"
             maxLength={100}
           />
-          {accounts.length > 1 && (
+          {instagramEnabled && accounts.length > 1 && (
             <div className="pt-2">
               <AccountSelect
                 accounts={accounts}
@@ -719,6 +978,40 @@ export default function CampaignBuilder({
           )}
         </div>
 
+        <Section title="Onde a campanha roda">
+          <ChannelOption
+            label="Instagram"
+            detail={accounts.length > 0 ? `@${username}` : "Nenhuma conta conectada"}
+            on={instagramEnabled}
+            // The Instagram half of an existing campaign can't be removed, and a
+            // Facebook-only campaign can't grow one.
+            locked={mode === "edit"}
+            disabled={accounts.length === 0 && !instagramEnabled}
+            onToggle={toggleInstagram}
+          />
+          <ChannelOption
+            label="Facebook"
+            detail={
+              facebookPages.length > 0
+                ? (selectedFacebookPage?.name ?? "Página do Facebook")
+                : facebookLoaded
+                  ? "Nenhuma Página conectada. Conecte em Configurações."
+                  : "Carregando…"
+            }
+            on={facebookEnabled}
+            locked={Boolean(facebookRuleId)}
+            disabled={facebookLoaded && facebookPages.length === 0 && !facebookEnabled}
+            onToggle={toggleFacebook}
+          />
+          {instagramEnabled && facebookEnabled && (
+            <p className="text-xs text-muted">
+              Nos dois canais valem as mesmas palavras, mensagem, link e respostas. DM inicial,
+              exigir seguir e mensagem posterior valem só no Instagram.
+            </p>
+          )}
+        </Section>
+
+        {instagramEnabled && (
         <Section title="Quando alguém comentar em">
           <Radio
             checked={triggerScope === "specific"}
@@ -749,6 +1042,105 @@ export default function CampaignBuilder({
             a próxima publicação ou reel
           </Radio>
         </Section>
+        )}
+
+        {facebookEnabled && (
+          <Section title="No Facebook, quando comentarem em">
+            {facebookPages.length > 1 && (
+              <select
+                value={facebookPageId}
+                onChange={(e) => {
+                  setFacebookPageId(e.target.value);
+                  setFacebookVideoId(null);
+                  setFacebookVideoTitle(null);
+                  setFacebookVideoUrl(null);
+                }}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+              >
+                {facebookPages.map((page) => (
+                  <option key={page.id} value={page.id}>
+                    {page.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Radio
+              checked={facebookScope === "specific"}
+              onSelect={() => setFacebookScope("specific")}
+            >
+              um vídeo ou reel específico da Página
+            </Radio>
+            {facebookScope === "specific" && (
+              <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                {facebookVideosError && (
+                  <p className="px-1 py-1 text-xs text-error">{facebookVideosError}</p>
+                )}
+                {facebookVideoId && !facebookVideos.some((video) => video.id === facebookVideoId) && (
+                  <div className="rounded-md border border-accent bg-accent/5 px-2 py-2 text-xs text-foreground">
+                    {facebookVideoTitle || facebookVideoId}
+                  </div>
+                )}
+                {facebookVideos.length === 0 && !facebookVideosError && (
+                  <p className="px-1 py-1 text-xs text-muted">Nenhum vídeo encontrado nesta Página.</p>
+                )}
+                {facebookVideos.map((video) => {
+                  const label = video.title || "Vídeo sem legenda";
+                  return (
+                    <button
+                      key={video.id}
+                      type="button"
+                      onClick={() => {
+                        setFacebookVideoId(video.id);
+                        setFacebookVideoTitle(label.slice(0, 300));
+                        setFacebookVideoUrl(video.permalinkUrl);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors ${
+                        facebookVideoId === video.id
+                          ? "border-accent bg-accent/5"
+                          : "border-transparent hover:bg-surface-hover"
+                      }`}
+                    >
+                      {video.thumbnailUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={video.thumbnailUrl}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded object-cover"
+                          loading="lazy"
+                        />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs text-foreground">{label}</span>
+                        <span className="block text-[11px] text-muted">
+                          {video.createdTime
+                            ? new Date(video.createdTime).toLocaleDateString("pt-BR", {
+                                day: "numeric",
+                                month: "short",
+                              })
+                            : ""}
+                          {video.isReel ? " · Reel" : ""}
+                          {video.comments !== null ? ` · ${video.comments} comentários` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <Radio
+              checked={facebookScope === "any"}
+              onSelect={() => setFacebookScope("any")}
+            >
+              qualquer vídeo ou publicação da Página
+            </Radio>
+            {selectedFacebookPage && !selectedFacebookPage.webhookSubscribed && (
+              <p className="text-xs text-warning">
+                Esta Página ainda não envia os comentários para o FISGA, então a campanha não dispara no
+                Facebook. Veja em Configurações → Página do Facebook.
+              </p>
+            )}
+          </Section>
+        )}
 
         <Section title="E esse comentário tiver">
           <Radio
@@ -774,6 +1166,8 @@ export default function CampaignBuilder({
           >
             qualquer palavra
           </Radio>
+          {instagramEnabled && (
+          <>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">
               também responder quando alguém enviar uma DM com{" "}
@@ -797,6 +1191,8 @@ export default function CampaignBuilder({
               value={storyMediaId}
               onChange={setStoryMediaId}
             />
+          )}
+          </>
           )}
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">
@@ -876,6 +1272,7 @@ export default function CampaignBuilder({
           )}
         </Section>
 
+        {instagramEnabled && (
         <Section title="A pessoa receberá">
           <div className="rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
@@ -941,6 +1338,7 @@ export default function CampaignBuilder({
             )}
           </div>
         </Section>
+        )}
 
         <Section title="Depois, a pessoa receberá">
           <div className="rounded-lg border border-border p-3 space-y-2">
@@ -969,7 +1367,7 @@ export default function CampaignBuilder({
                   maxLength={20}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none"
                 />
-                {secondLinkOpen ? (
+                {!instagramEnabled ? null : secondLinkOpen ? (
                   <div className="space-y-2 border-t border-border pt-2">
                     <input
                       value={secondaryDestinationUrl}
@@ -1008,6 +1406,7 @@ export default function CampaignBuilder({
               {"{link}"} insere o link rastreado; {"{username}"} personaliza a mensagem.
             </p>
           </div>
+          {instagramEnabled && (
           <div className="mt-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">
@@ -1056,6 +1455,7 @@ export default function CampaignBuilder({
               </div>
             )}
           </div>
+          )}
         </Section>
       </div>
 
@@ -1063,6 +1463,7 @@ export default function CampaignBuilder({
       <div>
         <p className="mb-4 text-sm text-muted">Prévia</p>
         <div className="flex min-w-0 justify-center lg:sticky lg:top-6 lg:block">
+          {instagramEnabled ? (
           <CampaignPreview
             tab={previewTab}
             onTabChange={setPreviewTab}
@@ -1092,6 +1493,29 @@ export default function CampaignBuilder({
             followUpMessage={followUpMessage}
             followUpDelayMinutes={followUpDelayMinutes}
           />
+          ) : (
+            <div className="w-full max-w-[320px] space-y-3 rounded-2xl border border-border bg-surface p-4">
+              <p className="text-xs font-semibold text-muted">
+                Messenger{selectedFacebookPage ? ` · ${selectedFacebookPage.name}` : ""}
+              </p>
+              <div className="whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-surface-hover px-3 py-2 text-sm text-foreground">
+                {dmMessage
+                  .replace(/\{username\}/gi, "Maria")
+                  .replace(/\s*\{link\}\s*/gi, " ")
+                  .trim() || "A mensagem aparece aqui."}
+              </div>
+              {trackedDestinationUrl.trim() && (
+                <div className="rounded-lg border border-border px-3 py-2 text-center text-sm font-semibold text-accent">
+                  {linkButtonLabel || "Abrir link"}
+                </div>
+              )}
+              {publicReplyEnabled && publicReplyMessages.some((m) => m.trim()) && (
+                <p className="text-xs text-muted">
+                  Resposta pública no comentário: “{publicReplyMessages.find((m) => m.trim())}”
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       </div>

@@ -78,6 +78,19 @@ export async function GET(request: NextRequest) {
       },
       // Lets the list tell that a test is running without a second request.
       abTests: { where: { status: "RUNNING" }, select: { id: true }, take: 1 },
+      // The Facebook half of the campaign, when it also runs there.
+      facebookRule: {
+        select: {
+          id: true,
+          facebookPageId: true,
+          videoId: true,
+          videoTitle: true,
+          videoUrl: true,
+          matchAnyPost: true,
+          isActive: true,
+          facebookPage: { select: { name: true } },
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -146,6 +159,24 @@ export async function GET(request: NextRequest) {
     if (row.status.startsWith("SKIPPED_")) item.skipped += count;
   }
 
+  const facebookRuleIds = automationsWithReports.flatMap((automation) =>
+    automation.facebookRule ? [automation.facebookRule.id] : []
+  );
+  const facebookCounts = facebookRuleIds.length
+    ? await prisma.facebookCommentLog.groupBy({
+        by: ["automationId", "status"],
+        where: { automationId: { in: facebookRuleIds } },
+        _count: { _all: true },
+      })
+    : [];
+  const facebookStats = new Map<string, { sent: number; failed: number }>();
+  for (const row of facebookCounts) {
+    const entry = facebookStats.get(row.automationId) ?? { sent: 0, failed: 0 };
+    if (row.status === "SENT") entry.sent += row._count._all;
+    if (row.status === "FAILED") entry.failed += row._count._all;
+    facebookStats.set(row.automationId, entry);
+  }
+
   const clickCounts = countUniqueClicksBy(clickRows, (row) => row.automationId);
   for (const [automationId, clicks] of clickCounts) {
     const item = analytics.get(automationId);
@@ -184,6 +215,20 @@ export async function GET(request: NextRequest) {
           ...link,
           trackedUrl: buildTrackedUrl(link.slug),
         })),
+        facebook: automation.facebookRule
+          ? {
+              id: automation.facebookRule.id,
+              facebookPageId: automation.facebookRule.facebookPageId,
+              pageName: automation.facebookRule.facebookPage.name,
+              videoId: automation.facebookRule.videoId,
+              videoTitle: automation.facebookRule.videoTitle,
+              videoUrl: automation.facebookRule.videoUrl,
+              matchAnyPost: automation.facebookRule.matchAnyPost,
+              isActive: automation.facebookRule.isActive,
+              sent: facebookStats.get(automation.facebookRule.id)?.sent ?? 0,
+              failed: facebookStats.get(automation.facebookRule.id)?.failed ?? 0,
+            }
+          : null,
         reportUrl: automation.reportShareSlug
           ? buildReportUrl(automation.reportShareSlug)
           : null,

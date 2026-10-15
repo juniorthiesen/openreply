@@ -242,10 +242,15 @@ model FacebookAutomation {
   publicReplyEnabled  Boolean  @default(false)
   publicReplyMessages String[] @default([])
   isActive            Boolean  @default(true)
+  /// The Instagram campaign this rule is the Facebook half of. Null for a
+  /// campaign that runs on Facebook only. Cascades, so deleting the campaign
+  /// deletes both halves.
+  automationId        String?  @unique
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   facebookPage FacebookPage         @relation(fields: [facebookPageId], references: [id], onDelete: Cascade)
+  automation   Automation?          @relation(fields: [automationId], references: [id], onDelete: Cascade)
   logs         FacebookCommentLog[]
 
   @@index([workspaceId])
@@ -392,6 +397,7 @@ model Automation {
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
   abTests          AbTest[]
+  facebookRule     FacebookAutomation?
   scheduledPost    ScheduledPost?
   storySequence    StorySequence?   @relation(fields: [storySequenceId], references: [id], onDelete: SetNull)
 

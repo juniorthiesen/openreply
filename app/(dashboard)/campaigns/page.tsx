@@ -60,6 +60,31 @@ interface Campaign {
     ctr: number;
     topKeywords: { keyword: string; count: number }[];
   };
+  // The Facebook half, when the campaign also runs on a Page.
+  facebook: {
+    id: string;
+    pageName: string;
+    isActive: boolean;
+    sent: number;
+    failed: number;
+  } | null;
+}
+
+/** A campaign that runs on Facebook only. */
+interface FacebookCampaign {
+  id: string;
+  name: string;
+  facebookPageId: string;
+  keywords: string[];
+  matchAnyWord: boolean;
+  matchAnyPost: boolean;
+  videoTitle: string | null;
+  videoUrl: string | null;
+  dmMessage: string;
+  isActive: boolean;
+  automationId: string | null;
+  sent: number;
+  failed: number;
 }
 
 export default function CampaignsPage() {
@@ -84,6 +109,9 @@ export default function CampaignsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">(
     "all"
   );
+  // Campaigns that run on Facebook only, and the Page names to label them with.
+  const [facebookOnly, setFacebookOnly] = useState<FacebookCampaign[]>([]);
+  const [facebookPageNames, setFacebookPageNames] = useState<Record<string, string>>({});
 
   const fetchAutomations = useCallback(async () => {
     try {
@@ -119,6 +147,35 @@ export default function CampaignsPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [fetchAutomations]);
+
+  // The Facebook-only campaigns. Ones that belong to an Instagram campaign are
+  // already shown on its card, so they are left out here.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/facebook/automations", { cache: "no-store" }).then((res) => res.json()),
+      fetch("/api/facebook/pages").then((res) => res.json()),
+    ])
+      .then(([rules, pages]) => {
+        if (cancelled) return;
+        if (rules.success) {
+          setFacebookOnly(
+            (rules.data.rules as FacebookCampaign[]).filter((rule) => !rule.automationId)
+          );
+        }
+        if (pages.success) {
+          setFacebookPageNames(
+            Object.fromEntries(
+              (pages.data.pages as { id: string; name: string }[]).map((page) => [page.id, page.name])
+            )
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Fetch fresh post thumbnails (and reel video URLs) for the accounts in view
   // and map them by postId. Cache-first so they show instantly on a return
@@ -212,6 +269,33 @@ export default function CampaignsPage() {
     }
   }
 
+  async function toggleFacebookOnly(rule: FacebookCampaign) {
+    try {
+      const res = await fetch(`/api/facebook/automations?id=${rule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !rule.isActive }),
+      });
+      if (res.ok) {
+        setFacebookOnly((prev) =>
+          prev.map((item) => (item.id === rule.id ? { ...item, isActive: !rule.isActive } : item))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to toggle:", err);
+    }
+  }
+
+  async function deleteFacebookOnly(rule: FacebookCampaign) {
+    if (!confirm("Excluir esta campanha? Esta ação não pode ser desfeita.")) return;
+    try {
+      const res = await fetch(`/api/facebook/automations?id=${rule.id}`, { method: "DELETE" });
+      if (res.ok) setFacebookOnly((prev) => prev.filter((item) => item.id !== rule.id));
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    }
+  }
+
   async function copyReelUrl(auto: Campaign) {
     setMenuOpenId(null);
     if (!auto.postUrl) return;
@@ -276,6 +360,21 @@ export default function CampaignsPage() {
     );
   });
 
+  // Facebook-only campaigns are filtered like the others. They are listed
+  // whatever Instagram account is selected, since they have none.
+  const filteredFacebook = facebookOnly.filter((rule) => {
+    if (statusFilter === "active" && !rule.isActive) return false;
+    if (statusFilter === "paused" && rule.isActive) return false;
+    if (!query) return true;
+    return (
+      rule.name.toLowerCase().includes(query) ||
+      rule.keywords.some((k) => k.toLowerCase().includes(query)) ||
+      rule.dmMessage.toLowerCase().includes(query)
+    );
+  });
+  const totalCount = automations.length + facebookOnly.length;
+  const shownCount = filtered.length + filteredFacebook.length;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -285,11 +384,9 @@ export default function CampaignsPage() {
             Campanhas
           </h1>
           <p className="text-sm text-muted">
-            {filtered.length}
-            {filtered.length !== automations.length
-              ? ` de ${automations.length}`
-              : ""}{" "}
-            campanha{automations.length !== 1 ? "s" : ""}
+            {shownCount}
+            {shownCount !== totalCount ? ` de ${totalCount}` : ""}{" "}
+            campanha{totalCount !== 1 ? "s" : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -316,7 +413,7 @@ export default function CampaignsPage() {
       </div>
 
       {/* Search + status filter */}
-      {automations.length > 0 && (
+      {totalCount > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <input
             value={search}
@@ -344,7 +441,7 @@ export default function CampaignsPage() {
       )}
 
       {/* Empty state */}
-      {automations.length === 0 && (
+      {totalCount === 0 && (
         <div className="panel rounded p-8 text-center sm:p-12">
           <h3 className="text-lg font-semibold mb-2">Ainda não há campanhas</h3>
           <p className="text-sm text-muted mb-6 max-w-sm mx-auto">
@@ -360,7 +457,7 @@ export default function CampaignsPage() {
       )}
 
       {/* No matches for the current filter */}
-      {automations.length > 0 && filtered.length === 0 && (
+      {totalCount > 0 && shownCount === 0 && (
         <div className="panel rounded p-8 text-center text-sm text-muted">
           Nenhuma campanha corresponde à sua busca.
         </div>
@@ -435,6 +532,14 @@ export default function CampaignsPage() {
                   >
                     {auto.isActive ? "Ativa" : "Pausada"}
                   </span>
+                  {auto.facebook && (
+                    <span
+                      className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
+                      title={`Também roda no Facebook: ${auto.facebook.pageName}`}
+                    >
+                      + Facebook
+                    </span>
+                  )}
                   {auto.pendingNextReel && (
                     <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-warning">
                       Aguardando o próximo reel
@@ -491,6 +596,17 @@ export default function CampaignsPage() {
                   <span>{auto.analytics.failed} falhas</span>
                   <span>·</span>
                   <span>{auto.analytics.clicks} cliques</span>
+                  {auto.facebook && (
+                    <>
+                      <span>·</span>
+                      <span>
+                        Facebook: {auto.facebook.sent} enviadas
+                        {auto.facebook.failed > 0 && (
+                          <span className="text-error"> · {auto.facebook.failed} falhas</span>
+                        )}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 {auto.analytics.topKeywords.length > 0 && (
@@ -579,6 +695,80 @@ export default function CampaignsPage() {
           </div>
           );
         })}
+
+        {/* Campaigns that run on Facebook only */}
+        {filteredFacebook.map((rule) => (
+          <div
+            key={rule.id}
+            onClick={() => router.push(`/campaigns/facebook/${rule.id}/edit`)}
+            className="panel cursor-pointer rounded p-4 transition-all hover:border-border-hover"
+          >
+            <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+              <div className="min-w-[12rem] flex-1">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-sm font-semibold">{rule.name}</h3>
+                  <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-xs text-muted">
+                    Facebook · {facebookPageNames[rule.facebookPageId] ?? "Página"}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      rule.isActive ? "bg-success/10 text-success" : "bg-surface-hover text-muted"
+                    }`}
+                  >
+                    {rule.isActive ? "Ativa" : "Pausada"}
+                  </span>
+                </div>
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {rule.matchAnyWord ? (
+                    <span className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-muted">
+                      qualquer comentário
+                    </span>
+                  ) : (
+                    rule.keywords.map((kw) => (
+                      <span
+                        key={kw}
+                        className="rounded-md border border-accent/10 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
+                      >
+                        {kw}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <p className="truncate text-sm text-muted">&ldquo;{rule.dmMessage}&rdquo;</p>
+                <p className="mt-2 truncate text-xs text-muted">
+                  {rule.matchAnyPost ? "Qualquer vídeo da Página" : (rule.videoTitle ?? "Vídeo específico")}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+                  <span>{rule.sent} enviadas</span>
+                  <span>·</span>
+                  <span>{rule.failed} falhas</span>
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => void toggleFacebookOnly(rule)}
+                  aria-label={rule.isActive ? "Pausar campanha" : "Ativar campanha"}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${
+                    rule.isActive ? "bg-accent" : "bg-border-hover"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      rule.isActive ? "left-6" : "left-1"
+                    }`}
+                  />
+                </button>
+                <button
+                  onClick={() => void deleteFacebookOnly(rule)}
+                  aria-label="Excluir campanha"
+                  className="rounded px-2 py-1 text-xs text-muted hover:text-error"
+                >
+                  Excluir
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Reel lightbox */}

@@ -13,6 +13,14 @@ import { prisma } from "@/lib/db/client";
 import { buildInitialCampaignLinks, syncCampaignLinks } from "@/lib/campaigns/links";
 import { generateReportShareSlug } from "@/lib/reports/share";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
+import {
+  buildFacebookRuleData,
+  channelFromRule,
+  facebookChannelSchema,
+  findFacebookIncompatibility,
+  type FacebookChannelInput,
+  type SharedCampaignFields,
+} from "@/lib/campaigns/facebook-channel";
 
 export type CampaignResult<T> =
   | { ok: true; data: T }
@@ -113,6 +121,8 @@ export const createCampaignSchema = z
     secondaryButtonLabel: z.string().max(20).optional().nullable(),
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
+    // Also run this campaign on a Facebook Page. Omit for Instagram only.
+    facebook: facebookChannelSchema.optional().nullable(),
   })
   .superRefine((d, ctx) => {
     const violation = findCampaignRuleViolation(d);
@@ -171,6 +181,9 @@ export const updateCampaignSchema = z.object({
     .optional()
     .nullable(),
   secondaryButtonLabel: z.string().max(20).optional().nullable(),
+  // undefined keeps the Facebook half as it is, null removes it, a value adds
+  // or changes it.
+  facebook: facebookChannelSchema.optional().nullable(),
 });
 
 export type CreateCampaignInput = z.output<typeof createCampaignSchema>;
@@ -203,6 +216,19 @@ export async function createCampaign(workspaceId: string, input: CreateCampaignI
 
   if (!workspace) return fail(404, "Workspace not found");
   if (!instagramAccount) return fail(400, "Connect Instagram before creating campaigns");
+
+  if (input.facebook) {
+    const page = await prisma.facebookPage.findFirst({
+      where: { id: input.facebook.facebookPageId, workspaceId },
+      select: { id: true },
+    });
+    if (!page) return fail(400, "A Página do Facebook escolhida não está conectada.");
+    const incompatibility = findFacebookIncompatibility({
+      publicReplyEnabled: input.publicReplyEnabled,
+      publicReplyMessages: input.publicReplyMessages,
+    });
+    if (incompatibility) return fail(400, incompatibility);
+  }
 
   const linkCreates = buildInitialCampaignLinks({
     workspaceId,
@@ -275,6 +301,36 @@ export async function createCampaign(workspaceId: string, input: CreateCampaignI
     },
   });
 
+  if (input.facebook) {
+    try {
+      await prisma.facebookAutomation.create({
+        data: {
+          ...buildFacebookRuleData(
+            {
+              name: input.name,
+              keywords: input.keywords,
+              matchAnyWord,
+              wholeWordMatch: input.wholeWordMatch,
+              dmMessage: input.dmMessage,
+              linkUrl: input.trackedDestinationUrl || null,
+              linkButtonLabel: input.linkButtonLabel || null,
+              publicReplyEnabled: input.publicReplyEnabled,
+              publicReplyMessages: publicReplyList,
+              isActive: input.isActive,
+            },
+            input.facebook
+          ),
+          workspaceId,
+          automationId: automation.id,
+        },
+      });
+    } catch (error) {
+      // The campaign is one thing: don't leave its Instagram half behind alone.
+      await prisma.automation.delete({ where: { id: automation.id } }).catch(() => {});
+      throw error;
+    }
+  }
+
   return { ok: true, data: automation } as const;
 }
 
@@ -292,6 +348,7 @@ export async function updateCampaign(
     trackedDestinationUrl,
     secondaryDestinationUrl,
     secondaryButtonLabel,
+    facebook,
     ...automationData
   } = input;
 
@@ -382,6 +439,28 @@ export async function updateCampaign(
     });
   }
 
+  // The Facebook half follows the campaign: it is re-derived from the merged
+  // fields on every save, so editing the keywords, messages, link or active
+  // state here changes it too.
+  const existingRule = await prisma.facebookAutomation.findUnique({
+    where: { automationId },
+  });
+  const keepsFacebook = facebook !== null && (facebook !== undefined || Boolean(existingRule));
+  if (keepsFacebook) {
+    if (facebook) {
+      const page = await prisma.facebookPage.findFirst({
+        where: { id: facebook.facebookPageId, workspaceId },
+        select: { id: true },
+      });
+      if (!page) return fail(400, "A Página do Facebook escolhida não está conectada.");
+    }
+    const incompatibility = findFacebookIncompatibility({
+      publicReplyEnabled: merged.publicReplyEnabled,
+      publicReplyMessages: merged.publicReplyMessages,
+    });
+    if (incompatibility) return fail(400, incompatibility);
+  }
+
   // One transaction, so a save never lands half applied. Updating the campaign
   // first locks its row, which makes a second save of the same campaign wait
   // for this one before it reads the links.
@@ -398,6 +477,36 @@ export async function updateCampaign(
       secondaryUrl: secondaryDestinationUrl,
       secondaryLabel: secondaryButtonLabel,
     });
+
+    if (facebook === null) {
+      await tx.facebookAutomation.deleteMany({ where: { automationId } });
+    } else if (keepsFacebook) {
+      const primaryLink = await tx.trackedLink.findFirst({
+        where: { automationId, ...NOT_AB_VARIANT_LINK },
+        orderBy: TRACKED_LINK_ORDER,
+        select: { destinationUrl: true },
+      });
+      const shared: SharedCampaignFields = {
+        name: campaign.name,
+        keywords: campaign.keywords,
+        matchAnyWord: campaign.matchAnyWord,
+        wholeWordMatch: campaign.wholeWordMatch,
+        dmMessage: campaign.dmMessage,
+        linkUrl: primaryLink?.destinationUrl ?? null,
+        linkButtonLabel: campaign.linkButtonLabel,
+        publicReplyEnabled: campaign.publicReplyEnabled,
+        publicReplyMessages: campaign.publicReplyMessages,
+        isActive: campaign.isActive,
+      };
+      const channel: FacebookChannelInput =
+        facebook ?? channelFromRule(existingRule as NonNullable<typeof existingRule>);
+      const data = buildFacebookRuleData(shared, channel);
+      await tx.facebookAutomation.upsert({
+        where: { automationId },
+        create: { ...data, workspaceId, automationId },
+        update: data,
+      });
+    }
 
     return campaign;
   });

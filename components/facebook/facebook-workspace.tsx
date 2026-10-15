@@ -1,8 +1,10 @@
 "use client";
 
 /**
- * Facebook Page workspace: metrics for the Page and its videos, and the
- * comment-to-message rules that answer people who comment on them.
+ * Facebook Page workspace: metrics for the Page and its videos, and a summary of
+ * the campaigns that answer comments on them. Campaigns are created and edited
+ * in the campaign builder (Campanhas), once, for Instagram and Facebook alike;
+ * this screen only links there.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -15,21 +17,14 @@ import type {
 
 interface Rule {
   id: string;
-  facebookPageId: string;
   name: string;
-  videoId: string | null;
   videoTitle: string | null;
-  videoUrl: string | null;
   matchAnyPost: boolean;
   keywords: string[];
   matchAnyWord: boolean;
-  wholeWordMatch: boolean;
-  dmMessage: string;
-  linkUrl: string | null;
-  linkButtonLabel: string | null;
-  publicReplyEnabled: boolean;
-  publicReplyMessages: string[];
   isActive: boolean;
+  /** The Instagram campaign this is the Facebook half of, if any. */
+  automationId: string | null;
   sent: number;
   failed: number;
 }
@@ -41,23 +36,6 @@ interface Failure {
   createdAt: string;
 }
 
-interface FormState {
-  id: string | null;
-  name: string;
-  videoId: string; // "" = every video
-  videoTitle: string;
-  videoUrl: string;
-  keywords: string;
-  matchAnyWord: boolean;
-  dmMessage: string;
-  linkUrl: string;
-  linkButtonLabel: string;
-  publicReplyEnabled: boolean;
-  publicReplyMessages: string;
-}
-
-const inputClass =
-  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none";
 const ghostButton =
   "inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50";
 const primaryButton =
@@ -80,36 +58,15 @@ function videoLabel(video: FacebookVideoRow): string {
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 
-const emptyForm: FormState = {
-  id: null,
-  name: "",
-  videoId: "",
-  videoTitle: "",
-  videoUrl: "",
-  keywords: "",
-  matchAnyWord: false,
-  dmMessage: "",
-  linkUrl: "",
-  linkButtonLabel: "",
-  publicReplyEnabled: false,
-  publicReplyMessages: "",
-};
-
-function formFromRule(rule: Rule): FormState {
-  return {
-    id: rule.id,
-    name: rule.name,
-    videoId: rule.matchAnyPost ? "" : (rule.videoId ?? ""),
-    videoTitle: rule.videoTitle ?? "",
-    videoUrl: rule.videoUrl ?? "",
-    keywords: rule.keywords.join(", "),
-    matchAnyWord: rule.matchAnyWord,
-    dmMessage: rule.dmMessage,
-    linkUrl: rule.linkUrl ?? "",
-    linkButtonLabel: rule.linkButtonLabel ?? "",
-    publicReplyEnabled: rule.publicReplyEnabled,
-    publicReplyMessages: rule.publicReplyMessages.join("\n"),
-  };
+/** The campaign builder, started from a Facebook video. */
+function newCampaignHref(video?: FacebookVideoRow): string {
+  if (!video) return "/campaigns/new?channel=facebook";
+  const params = new URLSearchParams({
+    facebookVideoId: video.id,
+    facebookVideoTitle: videoLabel(video).slice(0, 200),
+  });
+  if (video.permalinkUrl) params.set("facebookVideoUrl", video.permalinkUrl);
+  return `/campaigns/new?${params}`;
 }
 
 export default function FacebookWorkspace() {
@@ -118,12 +75,10 @@ export default function FacebookWorkspace() {
   const [failures, setFailures] = useState<Failure[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
-  const [form, setForm] = useState<FormState | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   // Bumping this refetches everything. `loading` only drives the first-load
-  // skeleton, so a reload after saving keeps the current screen on display.
+  // skeleton, so a reload keeps the current screen on display.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((key) => key + 1), []);
 
@@ -160,99 +115,6 @@ export default function FacebookWorkspace() {
       cancelled = true;
     };
   }, [reloadKey]);
-
-  function openForm(video?: FacebookVideoRow) {
-    setFormError(null);
-    setForm(
-      video
-        ? {
-            ...emptyForm,
-            name: `Resposta — ${videoLabel(video).slice(0, 40)}`,
-            videoId: video.id,
-            videoTitle: videoLabel(video),
-            videoUrl: video.permalinkUrl ?? "",
-          }
-        : emptyForm
-    );
-  }
-
-  function patchForm(changes: Partial<FormState>) {
-    setForm((current) => (current ? { ...current, ...changes } : current));
-  }
-
-  async function saveForm() {
-    if (!form || !data) return;
-    setBusy("form");
-    setFormError(null);
-    const body = {
-      facebookPageId: data.page.id,
-      name: form.name.trim(),
-      matchAnyPost: form.videoId === "",
-      videoId: form.videoId || null,
-      videoTitle: form.videoTitle || null,
-      videoUrl: form.videoUrl || null,
-      matchAnyWord: form.matchAnyWord,
-      keywords: form.keywords.split(",").map((word) => word.trim()).filter(Boolean),
-      dmMessage: form.dmMessage.trim(),
-      linkUrl: form.linkUrl.trim() || null,
-      linkButtonLabel: form.linkButtonLabel.trim() || null,
-      publicReplyEnabled: form.publicReplyEnabled,
-      publicReplyMessages: form.publicReplyMessages
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
-    };
-    try {
-      const response = await fetch(
-        form.id ? `/api/facebook/automations?id=${form.id}` : "/api/facebook/automations",
-        {
-          method: form.id ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-      const payload = await response.json();
-      if (!response.ok || !payload.success) {
-        setFormError(payload.error ?? "Não foi possível salvar a campanha.");
-        return;
-      }
-      setForm(null);
-      reload();
-    } catch {
-      setFormError("Não foi possível salvar a campanha.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function toggleRule(rule: Rule) {
-    setBusy(rule.id);
-    try {
-      const response = await fetch(`/api/facebook/automations?id=${rule.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: !rule.isActive }),
-      });
-      if (response.ok) {
-        setRules((current) =>
-          current.map((item) => (item.id === rule.id ? { ...item, isActive: !rule.isActive } : item))
-        );
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function deleteRule(rule: Rule) {
-    if (!confirm(`Apagar a campanha “${rule.name}”? O histórico de respostas dela também é apagado.`)) return;
-    setBusy(rule.id);
-    try {
-      const response = await fetch(`/api/facebook/automations?id=${rule.id}`, { method: "DELETE" });
-      if (response.ok) setRules((current) => current.filter((item) => item.id !== rule.id));
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function retryWebhook() {
     if (!data) return;
@@ -297,6 +159,8 @@ export default function FacebookWorkspace() {
   const { summary, insights, videos, page } = data;
   const missing = [...new Set([...data.missingMetricScopes, ...data.missingReplyScopes])];
   const ruleName = (id: string) => rules.find((rule) => rule.id === id)?.name ?? "Campanha";
+  const ruleHref = (rule: Rule) =>
+    rule.automationId ? `/campaigns/${rule.automationId}` : `/campaigns/facebook/${rule.id}/edit`;
 
   return (
     <div className="space-y-8">
@@ -317,9 +181,9 @@ export default function FacebookWorkspace() {
             {summary?.followers != null && ` · ${summary.followers.toLocaleString("pt-BR")} seguidores`}
           </p>
         </div>
-        <button type="button" className={primaryButton} onClick={() => openForm()}>
-          Nova resposta automática
-        </button>
+        <Link href={newCampaignHref()} className={primaryButton}>
+          Nova campanha no Facebook
+        </Link>
       </div>
 
       {!page.webhookSubscribed && (
@@ -356,151 +220,44 @@ export default function FacebookWorkspace() {
         </p>
       )}
 
-      {form && (
-        <div className="panel space-y-4 rounded p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-foreground">
-            {form.id ? "Editar resposta automática" : "Nova resposta automática"}
-          </h2>
-
-          <label className="block space-y-1 text-sm">
-            <span className="text-xs font-semibold text-muted">Nome</span>
-            <input className={inputClass} value={form.name} maxLength={120} onChange={(e) => patchForm({ name: e.target.value })} />
-          </label>
-
-          <label className="block space-y-1 text-sm">
-            <span className="text-xs font-semibold text-muted">Vídeo</span>
-            <select
-              className={inputClass}
-              value={form.videoId}
-              onChange={(e) => {
-                const video = videos.find((item) => item.id === e.target.value);
-                patchForm({
-                  videoId: e.target.value,
-                  videoTitle: video ? videoLabel(video) : "",
-                  videoUrl: video?.permalinkUrl ?? "",
-                });
-              }}
-            >
-              <option value="">Todos os vídeos e posts da Página</option>
-              {form.videoId && !videos.some((video) => video.id === form.videoId) && (
-                <option value={form.videoId}>{form.videoTitle || form.videoId}</option>
-              )}
-              {videos.map((video) => (
-                <option key={video.id} value={video.id}>
-                  {formatDate(video.createdTime)} — {videoLabel(video)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="space-y-2">
-            <label className="block space-y-1 text-sm">
-              <span className="text-xs font-semibold text-muted">Palavras-chave (separe por vírgula)</span>
-              <input
-                className={inputClass}
-                value={form.keywords}
-                disabled={form.matchAnyWord}
-                placeholder="Ex.: quero, link, brincadeira"
-                onChange={(e) => patchForm({ keywords: e.target.value })}
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={form.matchAnyWord} onChange={(e) => patchForm({ matchAnyWord: e.target.checked })} />
-              Responder a qualquer comentário
-            </label>
-          </div>
-
-          <label className="block space-y-1 text-sm">
-            <span className="text-xs font-semibold text-muted">Mensagem enviada no Messenger</span>
-            <textarea
-              className={`${inputClass} resize-none`}
-              rows={4}
-              maxLength={2000}
-              value={form.dmMessage}
-              placeholder="Oi, {username}! Aqui está o que você pediu 😊"
-              onChange={(e) => patchForm({ dmMessage: e.target.value })}
-            />
-            <span className="text-xs text-muted">{"{username}"} vira o primeiro nome de quem comentou.</span>
-          </label>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block space-y-1 text-sm">
-              <span className="text-xs font-semibold text-muted">Link (opcional)</span>
-              <input className={inputClass} value={form.linkUrl} placeholder="https://" onChange={(e) => patchForm({ linkUrl: e.target.value })} />
-            </label>
-            <label className="block space-y-1 text-sm">
-              <span className="text-xs font-semibold text-muted">Texto do botão</span>
-              <input className={inputClass} value={form.linkButtonLabel} maxLength={20} placeholder="Abrir link" onChange={(e) => patchForm({ linkButtonLabel: e.target.value })} />
-            </label>
-          </div>
-
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={form.publicReplyEnabled} onChange={(e) => patchForm({ publicReplyEnabled: e.target.checked })} />
-              Também responder publicamente no comentário
-            </label>
-            {form.publicReplyEnabled && (
-              <label className="block space-y-1 text-sm">
-                <span className="text-xs font-semibold text-muted">Uma resposta por linha; o FISGA alterna entre elas</span>
-                <textarea
-                  className={`${inputClass} resize-none`}
-                  rows={3}
-                  value={form.publicReplyMessages}
-                  placeholder={"Te enviei no Messenger! 💛\nConfere sua caixa de mensagens 😉"}
-                  onChange={(e) => patchForm({ publicReplyMessages: e.target.value })}
-                />
-              </label>
-            )}
-          </div>
-
-          {formError && <p className="text-sm text-error">{formError}</p>}
-          <div className="flex gap-2">
-            <button type="button" className={primaryButton} onClick={saveForm} disabled={busy === "form"}>
-              {busy === "form" ? "Salvando..." : form.id ? "Salvar" : "Criar e ativar"}
-            </button>
-            <button type="button" className={ghostButton} onClick={() => setForm(null)} disabled={busy === "form"}>
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="panel rounded p-4 sm:p-6">
-        <h2 className="mb-4 text-sm font-semibold text-foreground">Respostas automáticas</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-foreground">Campanhas no Facebook</h2>
+          <Link href="/campaigns" className="text-xs font-semibold text-accent hover:underline">
+            Ver todas as campanhas
+          </Link>
+        </div>
         {rules.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted">
-            Nenhuma resposta criada. Use “Responder comentários” em um vídeo abaixo.
+            Nenhuma campanha roda no Facebook ainda. Use “Criar campanha” em um vídeo abaixo.
           </p>
         ) : (
           <ul className="divide-y divide-border">
             {rules.map((rule) => (
-              <li key={rule.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <li key={rule.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${rule.isActive ? "bg-success/15 text-success" : "bg-surface-hover text-muted"}`}>
                       {rule.isActive ? "ATIVA" : "PAUSADA"}
                     </span>
                     <span className="truncate text-sm font-semibold text-foreground">{rule.name}</span>
+                    {rule.automationId && (
+                      <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                        Instagram + Facebook
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 truncate text-xs text-muted">
-                    {rule.matchAnyPost ? "Todos os vídeos" : (rule.videoTitle ?? rule.videoId)} ·{" "}
+                    {rule.matchAnyPost ? "Todos os vídeos" : (rule.videoTitle ?? "Vídeo específico")} ·{" "}
                     {rule.matchAnyWord ? "qualquer comentário" : rule.keywords.join(", ")}
                   </p>
                   <p className="mt-1 text-xs text-muted">
                     {rule.sent} enviadas{rule.failed > 0 && <span className="text-error"> · {rule.failed} com falha</span>}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2">
-                  <button type="button" className={ghostButton} disabled={busy === rule.id} onClick={() => toggleRule(rule)}>
-                    {rule.isActive ? "Pausar" : "Ativar"}
-                  </button>
-                  <button type="button" className={ghostButton} onClick={() => { setFormError(null); setForm(formFromRule(rule)); }}>
-                    Editar
-                  </button>
-                  <button type="button" className={ghostButton} disabled={busy === rule.id} onClick={() => deleteRule(rule)}>
-                    Apagar
-                  </button>
-                </div>
+                <Link href={ruleHref(rule)} className={ghostButton}>
+                  Abrir campanha
+                </Link>
               </li>
             ))}
           </ul>
@@ -534,7 +291,7 @@ export default function FacebookWorkspace() {
                   <th className="px-1.5 py-2 text-right font-medium">Reações</th>
                   <th className="px-1.5 py-2 text-right font-medium">Comentários</th>
                   <th className="px-1.5 py-2 text-right font-medium">Data</th>
-                  <th className="py-2 pl-3 font-medium">Resposta</th>
+                  <th className="py-2 pl-3 font-medium">Campanha</th>
                 </tr>
               </thead>
               <tbody>
@@ -569,9 +326,9 @@ export default function FacebookWorkspace() {
                           ATIVA
                         </span>
                       )}
-                      <button type="button" className="text-[11px] font-semibold text-accent hover:underline" onClick={() => openForm(video)}>
-                        {video.activeRules > 0 ? "Outra resposta" : "Responder comentários"}
-                      </button>
+                      <Link href={newCampaignHref(video)} className="text-[11px] font-semibold text-accent hover:underline">
+                        {video.activeRules > 0 ? "Outra campanha" : "Criar campanha"}
+                      </Link>
                     </td>
                   </tr>
                 ))}
